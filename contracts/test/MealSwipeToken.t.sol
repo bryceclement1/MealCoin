@@ -1,0 +1,530 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import {Test} from "forge-std/Test.sol";
+import {MealSwipeToken} from "../src/MealSwipeToken.sol";
+
+contract MealSwipeTokenTest is Test {
+    MealSwipeToken public token;
+    address public owner;
+    address public alice = makeAddr("alice");
+    address public bob = makeAddr("bob");
+    address public diningHall = makeAddr("diningHall");
+
+    function setUp() public {
+        owner = address(this);
+        token = new MealSwipeToken();
+    }
+
+    // ============ Constructor Tests ============
+
+    function test_Constructor_SetsOwner() public view {
+        assertEq(token.owner(), owner);
+    }
+
+    function test_Constructor_SetsName() public view {
+        assertEq(token.name(), "MealSwipeToken");
+    }
+
+    function test_Constructor_SetsSymbol() public view {
+        assertEq(token.symbol(), "MST");
+    }
+
+    function test_Constructor_SetsDecimals() public view {
+        assertEq(token.decimals(), 0);
+    }
+
+    function test_Constructor_SetsCurrentWeek() public view {
+        uint256 expectedWeek = block.timestamp / 7 days;
+        assertEq(token.currentWeek(), expectedWeek);
+    }
+
+    // ============ balanceOf Tests ============
+
+    function test_BalanceOf_ReturnsZeroForNewAddress() public view {
+        uint256 currentWeek = token.currentWeek();
+        assertEq(token.balanceOf(alice, currentWeek), 0);
+    }
+
+    function test_BalanceOf_ReturnsZeroForDifferentWeek() public view {
+        uint256 futureWeek = token.currentWeek() + 10;
+        assertEq(token.balanceOf(alice, futureWeek), 0);
+    }
+
+    function test_BalanceOf_ReturnsZeroForZeroAddress() public view {
+        uint256 currentWeek = token.currentWeek();
+        assertEq(token.balanceOf(address(0), currentWeek), 0);
+    }
+
+    // ============ mint Tests ============
+
+    function test_Mint_AdminCanMint() public {
+        uint256 currentWeek = token.currentWeek();
+
+        token.mint(alice, 6, currentWeek);
+
+        assertEq(token.balanceOf(alice, currentWeek), 6);
+    }
+
+    function test_Mint_UpdatesTotalSupplyByWeek() public {
+        uint256 currentWeek = token.currentWeek();
+
+        token.mint(alice, 6, currentWeek);
+        token.mint(bob, 4, currentWeek);
+
+        assertEq(token.totalSupplyByWeek(currentWeek), 10);
+    }
+
+    function test_Mint_EmitsMintEvent() public {
+        uint256 currentWeek = token.currentWeek();
+
+        vm.expectEmit(true, false, false, true);
+        emit MealSwipeToken.Mint(alice, 6, currentWeek);
+
+        token.mint(alice, 6, currentWeek);
+    }
+
+    function test_Mint_CanMintToSameAddressMultipleTimes() public {
+        uint256 currentWeek = token.currentWeek();
+
+        token.mint(alice, 3, currentWeek);
+        token.mint(alice, 3, currentWeek);
+
+        assertEq(token.balanceOf(alice, currentWeek), 6);
+    }
+
+    function test_Mint_CanMintForDifferentWeeks() public {
+        uint256 currentWeek = token.currentWeek();
+        uint256 nextWeek = currentWeek + 1;
+
+        token.mint(alice, 6, currentWeek);
+        token.mint(alice, 6, nextWeek);
+
+        assertEq(token.balanceOf(alice, currentWeek), 6);
+        assertEq(token.balanceOf(alice, nextWeek), 6);
+    }
+
+    function test_Mint_RevertsWhenNotOwner() public {
+        uint256 currentWeek = token.currentWeek();
+
+        vm.prank(alice);
+        vm.expectRevert(MealSwipeToken.NotOwner.selector);
+        token.mint(alice, 6, currentWeek);
+    }
+
+    function test_Mint_RevertsWhenAmountIsZero() public {
+        uint256 currentWeek = token.currentWeek();
+
+        vm.expectRevert(MealSwipeToken.InvalidAmount.selector);
+        token.mint(alice, 0, currentWeek);
+    }
+
+    function test_Mint_RevertsWhenAmountExceedsSix() public {
+        uint256 currentWeek = token.currentWeek();
+
+        vm.expectRevert(MealSwipeToken.InvalidAmount.selector);
+        token.mint(alice, 7, currentWeek);
+    }
+
+    function test_Mint_RevertsWhenToIsZeroAddress() public {
+        uint256 currentWeek = token.currentWeek();
+
+        vm.expectRevert(MealSwipeToken.ZeroAddress.selector);
+        token.mint(address(0), 6, currentWeek);
+    }
+
+    function test_Mint_AllowsAmountsOneToSix() public {
+        uint256 currentWeek = token.currentWeek();
+
+        // Test all valid amounts 1-6
+        for (uint256 i = 1; i <= 6; i++) {
+            address recipient = makeAddr(string(abi.encodePacked("recipient", i)));
+            token.mint(recipient, i, currentWeek);
+            assertEq(token.balanceOf(recipient, currentWeek), i);
+        }
+    }
+
+    // ============ transfer Tests ============
+
+    function test_Transfer_DecrementsSenderBalance() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+
+        vm.prank(alice);
+        token.transfer(bob, 2);
+
+        assertEq(token.balanceOf(alice, week), 4);
+    }
+
+    function test_Transfer_IncrementsRecipientBalance() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+
+        vm.prank(alice);
+        token.transfer(bob, 2);
+
+        assertEq(token.balanceOf(bob, week), 2);
+    }
+
+    function test_Transfer_EmitsTransferEvent() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+
+        vm.expectEmit(true, true, false, true);
+        emit MealSwipeToken.Transfer(alice, bob, 2, week);
+
+        vm.prank(alice);
+        token.transfer(bob, 2);
+    }
+
+    function test_Transfer_FullBalance() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+
+        vm.prank(alice);
+        token.transfer(bob, 6);
+
+        assertEq(token.balanceOf(alice, week), 0);
+        assertEq(token.balanceOf(bob, week), 6);
+    }
+
+    function test_Transfer_IsScopedToCurrentWeek() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+
+        // Advance to next week
+        vm.warp(block.timestamp + 7 days);
+        token.mint(alice, 3, week + 1);
+
+        // Transfer in the new week only affects new week's balance
+        vm.prank(alice);
+        token.transfer(bob, 2);
+
+        assertEq(token.balanceOf(alice, week), 6);       // old week untouched
+        assertEq(token.balanceOf(alice, week + 1), 1);   // new week decremented
+        assertEq(token.balanceOf(bob, week + 1), 2);
+    }
+
+    function test_Transfer_RevertsOnInsufficientBalance() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 3, week);
+
+        vm.prank(alice);
+        vm.expectRevert(MealSwipeToken.InsufficientBalance.selector);
+        token.transfer(bob, 4);
+    }
+
+    function test_Transfer_RevertsWhenBalanceIsZero() public {
+        vm.prank(alice);
+        vm.expectRevert(MealSwipeToken.InsufficientBalance.selector);
+        token.transfer(bob, 1);
+    }
+
+    function test_Transfer_RevertsOnZeroAmount() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+
+        vm.prank(alice);
+        vm.expectRevert(MealSwipeToken.InvalidAmount.selector);
+        token.transfer(bob, 0);
+    }
+
+    function test_Transfer_RevertsOnZeroAddress() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+
+        vm.prank(alice);
+        vm.expectRevert(MealSwipeToken.ZeroAddress.selector);
+        token.transfer(address(0), 1);
+    }
+
+    // ============ approveDining / revokeDining Tests ============
+
+    function test_ApproveDining_SetsMapping() public {
+        token.approveDining(diningHall);
+        assertTrue(token.approvedDining(diningHall));
+    }
+
+    function test_ApproveDining_EmitsEvent() public {
+        vm.expectEmit(true, false, false, false);
+        emit MealSwipeToken.DiningApproved(diningHall);
+        token.approveDining(diningHall);
+    }
+
+    function test_ApproveDining_RevertsWhenNotOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(MealSwipeToken.NotOwner.selector);
+        token.approveDining(diningHall);
+    }
+
+    function test_ApproveDining_RevertsOnZeroAddress() public {
+        vm.expectRevert(MealSwipeToken.ZeroAddress.selector);
+        token.approveDining(address(0));
+    }
+
+    function test_RevokeDining_ClearsMapping() public {
+        token.approveDining(diningHall);
+        token.revokeDining(diningHall);
+        assertFalse(token.approvedDining(diningHall));
+    }
+
+    function test_RevokeDining_EmitsEvent() public {
+        token.approveDining(diningHall);
+
+        vm.expectEmit(true, false, false, false);
+        emit MealSwipeToken.DiningRevoked(diningHall);
+        token.revokeDining(diningHall);
+    }
+
+    function test_RevokeDining_RevertsWhenNotOwner() public {
+        token.approveDining(diningHall);
+
+        vm.prank(alice);
+        vm.expectRevert(MealSwipeToken.NotOwner.selector);
+        token.revokeDining(diningHall);
+    }
+
+    function test_RevokeDining_DoesNotRevertOnUnapprovedAddress() public {
+        // Revoking an address that was never approved is a no-op, not an error
+        token.revokeDining(diningHall);
+        assertFalse(token.approvedDining(diningHall));
+    }
+
+    // ============ redeemSwipe Tests ============
+
+    function test_RedeemSwipe_DecrementsWalletBalance() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+        token.approveDining(diningHall);
+
+        vm.prank(diningHall);
+        token.redeemSwipe(alice);
+
+        assertEq(token.balanceOf(alice, week), 5);
+    }
+
+    function test_RedeemSwipe_DecrementsTotalSupply() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+        token.approveDining(diningHall);
+
+        vm.prank(diningHall);
+        token.redeemSwipe(alice);
+
+        assertEq(token.totalSupplyByWeek(week), 5);
+    }
+
+    function test_RedeemSwipe_EmitsEvent() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+        token.approveDining(diningHall);
+
+        vm.expectEmit(true, false, false, true);
+        emit MealSwipeToken.SwipeRedeemed(alice, week);
+
+        vm.prank(diningHall);
+        token.redeemSwipe(alice);
+    }
+
+    function test_RedeemSwipe_CanRedeemMultipleTimes() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 3, week);
+        token.approveDining(diningHall);
+
+        vm.startPrank(diningHall);
+        token.redeemSwipe(alice);
+        token.redeemSwipe(alice);
+        token.redeemSwipe(alice);
+        vm.stopPrank();
+
+        assertEq(token.balanceOf(alice, week), 0);
+        assertEq(token.totalSupplyByWeek(week), 0);
+    }
+
+    function test_RedeemSwipe_RevertsWhenNotApprovedDining() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+
+        vm.prank(bob);
+        vm.expectRevert(MealSwipeToken.NotApprovedDining.selector);
+        token.redeemSwipe(alice);
+    }
+
+    function test_RedeemSwipe_RevertsForOwnerIfNotApproved() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+
+        // owner is not automatically an approved dining address
+        vm.expectRevert(MealSwipeToken.NotApprovedDining.selector);
+        token.redeemSwipe(alice);
+    }
+
+    function test_RedeemSwipe_RevertsAfterDiningRevoked() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+        token.approveDining(diningHall);
+        token.revokeDining(diningHall);
+
+        vm.prank(diningHall);
+        vm.expectRevert(MealSwipeToken.NotApprovedDining.selector);
+        token.redeemSwipe(alice);
+    }
+
+    function test_RedeemSwipe_RevertsOnZeroBalance() public {
+        token.approveDining(diningHall);
+
+        vm.prank(diningHall);
+        vm.expectRevert(MealSwipeToken.InsufficientBalance.selector);
+        token.redeemSwipe(alice);
+    }
+
+    function test_RedeemSwipe_RevertsOnZeroAddress() public {
+        token.approveDining(diningHall);
+
+        vm.prank(diningHall);
+        vm.expectRevert(MealSwipeToken.ZeroAddress.selector);
+        token.redeemSwipe(address(0));
+    }
+
+    // ============ burnAll Tests ============
+
+    function test_BurnAll_BalanceOfReturnsZero() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+        token.mint(bob, 4, week);
+
+        token.burnAll(week);
+
+        assertEq(token.balanceOf(alice, week), 0);
+        assertEq(token.balanceOf(bob, week), 0);
+    }
+
+    function test_BurnAll_ZeroesTotalSupply() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+        token.mint(bob, 4, week);
+
+        token.burnAll(week);
+
+        assertEq(token.totalSupplyByWeek(week), 0);
+    }
+
+    function test_BurnAll_SetsBurnedWeeks() public {
+        uint256 week = token.currentWeek();
+        token.burnAll(week);
+        assertTrue(token.burnedWeeks(week));
+    }
+
+    function test_BurnAll_EmitsEventWithCorrectTotal() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+        token.mint(bob, 4, week);
+
+        vm.expectEmit(false, false, false, true);
+        emit MealSwipeToken.SwipesBurned(week, 10);
+
+        token.burnAll(week);
+    }
+
+    function test_BurnAll_EmitsZeroTotalForEmptyWeek() public {
+        uint256 week = token.currentWeek();
+
+        vm.expectEmit(false, false, false, true);
+        emit MealSwipeToken.SwipesBurned(week, 0);
+
+        token.burnAll(week);
+    }
+
+    function test_BurnAll_DoesNotAffectOtherWeeks() public {
+        uint256 week = token.currentWeek();
+        uint256 nextWeek = week + 1;
+        token.mint(alice, 6, week);
+        token.mint(alice, 6, nextWeek);
+
+        token.burnAll(week);
+
+        assertEq(token.balanceOf(alice, week), 0);
+        assertEq(token.balanceOf(alice, nextWeek), 6);
+    }
+
+    function test_BurnAll_RevertsCalledTwice() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+        token.burnAll(week);
+
+        vm.expectRevert(abi.encodeWithSelector(MealSwipeToken.EpochAlreadyBurned.selector, week));
+        token.burnAll(week);
+    }
+
+    function test_BurnAll_RevertsWhenNotOwner() public {
+        uint256 week = token.currentWeek();
+
+        vm.prank(alice);
+        vm.expectRevert(MealSwipeToken.NotOwner.selector);
+        token.burnAll(week);
+    }
+
+    // ============ getCurrentWeek Tests ============
+
+    function test_GetCurrentWeek_MatchesTimestamp() public view {
+        assertEq(token.getCurrentWeek(), block.timestamp / 7 days);
+    }
+
+    function test_GetCurrentWeek_AdvancesAfterWarp() public {
+        uint256 weekBefore = token.getCurrentWeek();
+        vm.warp(block.timestamp + 7 days);
+        assertEq(token.getCurrentWeek(), weekBefore + 1);
+    }
+
+    // ============ Integration Test ============
+
+    function test_Integration_FullFlow() public {
+        uint256 week = token.currentWeek();
+
+        // Setup: approve dining hall
+        token.approveDining(diningHall);
+
+        // Step 1: mint — admin loads alice (6 swipes) and bob (4 swipes)
+        token.mint(alice, 6, week);
+        token.mint(bob, 4, week);
+        assertEq(token.balanceOf(alice, week), 6);
+        assertEq(token.balanceOf(bob, week), 4);
+        assertEq(token.totalSupplyByWeek(week), 10);
+
+        // Step 2: transfer — alice sends 2 swipes to bob
+        vm.prank(alice);
+        token.transfer(bob, 2);
+        assertEq(token.balanceOf(alice, week), 4);
+        assertEq(token.balanceOf(bob, week), 6);
+
+        // Step 3: redeem — alice uses 3 meals at dining hall
+        vm.startPrank(diningHall);
+        token.redeemSwipe(alice);
+        token.redeemSwipe(alice);
+        token.redeemSwipe(alice);
+        vm.stopPrank();
+        assertEq(token.balanceOf(alice, week), 1);
+        assertEq(token.totalSupplyByWeek(week), 7); // 10 - 3 redeemed
+
+        // Step 4: redeem — bob uses 2 meals
+        vm.startPrank(diningHall);
+        token.redeemSwipe(bob);
+        token.redeemSwipe(bob);
+        vm.stopPrank();
+        assertEq(token.balanceOf(bob, week), 4);
+        assertEq(token.totalSupplyByWeek(week), 5); // 7 - 2 redeemed
+
+        // Step 5: burnAll — week ends, remaining swipes expire
+        token.burnAll(week);
+        assertEq(token.balanceOf(alice, week), 0); // 1 remaining swipe wiped
+        assertEq(token.balanceOf(bob, week), 0);   // 4 remaining swipes wiped
+        assertEq(token.totalSupplyByWeek(week), 0);
+        assertTrue(token.burnedWeeks(week));
+
+        // Step 6: confirm new week is unaffected
+        uint256 nextWeek = week + 1;
+        token.mint(alice, 6, nextWeek);
+        assertEq(token.balanceOf(alice, nextWeek), 6);
+        assertEq(token.balanceOf(alice, week), 0); // burned week still 0
+    }
+}
