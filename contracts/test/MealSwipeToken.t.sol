@@ -144,6 +144,47 @@ contract MealSwipeTokenTest is Test {
         }
     }
 
+    // ============ mint() Edge Cases ============
+
+    function test_Mint_EdgeCase_DoubleMintSameWeekAccumulatesBalanceAndSupply() public {
+        // Minting to the same address twice in the same week must accumulate,
+        // not overwrite. Also verifies totalSupplyByWeek tracks both mints.
+        uint256 week = token.currentWeek();
+
+        token.mint(alice, 4, week);
+        token.mint(alice, 2, week);
+
+        assertEq(token.balanceOf(alice, week), 6);
+        assertEq(token.totalSupplyByWeek(week), 6);
+    }
+
+    function test_Mint_EdgeCase_FutureWeekEpochSucceeds() public {
+        // Admin can pre-mint for a future week with no current-week context.
+        uint256 futureWeek = token.currentWeek() + 52; // one year out
+
+        token.mint(alice, 6, futureWeek);
+
+        assertEq(token.balanceOf(alice, futureWeek), 6);
+        assertEq(token.totalSupplyByWeek(futureWeek), 6);
+        // Current week is unaffected
+        assertEq(token.totalSupplyByWeek(token.currentWeek()), 0);
+    }
+
+    function test_Mint_EdgeCase_PastWeekEpochSucceeds() public {
+        // No restriction prevents minting for a past week epoch.
+        // (Useful for retroactive corrections; burnAll enforces expiry separately.)
+        uint256 pastWeek = token.currentWeek();
+        vm.warp(block.timestamp + 7 days); // advance to the next week
+        uint256 newCurrentWeek = token.getCurrentWeek(); // live week via block.timestamp
+
+        token.mint(alice, 3, pastWeek);
+
+        assertEq(token.balanceOf(alice, pastWeek), 3);
+        assertEq(token.totalSupplyByWeek(pastWeek), 3);
+        // New current week is unaffected by the past-week mint
+        assertEq(token.totalSupplyByWeek(newCurrentWeek), 0);
+    }
+
     // ============ transfer Tests ============
 
     function test_Transfer_DecrementsSenderBalance() public {
@@ -236,6 +277,135 @@ contract MealSwipeTokenTest is Test {
         vm.prank(alice);
         vm.expectRevert(MealSwipeToken.ZeroAddress.selector);
         token.transfer(address(0), 1);
+    }
+
+    // ============ transfer() Edge Cases ============
+
+    function test_Transfer_EdgeCase_SelfTransferLeavesBalanceUnchanged() public {
+        // Transferring to yourself is not blocked by the contract.
+        // The mapping subtracts then adds for the same key — net effect is zero.
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+
+        vm.prank(alice);
+        token.transfer(alice, 3);
+
+        assertEq(token.balanceOf(alice, week), 6);
+    }
+
+    function test_Transfer_EdgeCase_Week2TransferOfWeek1TokensReverts() public {
+        // Tokens minted in week 1 are not accessible in week 2.
+        // transfer() uses live block.timestamp / 7 days, so the week 2 balance is 0.
+        uint256 week1 = token.currentWeek();
+        token.mint(alice, 6, week1);
+
+        vm.warp(block.timestamp + 7 days); // move to week 2
+
+        vm.prank(alice);
+        vm.expectRevert(MealSwipeToken.InsufficientBalance.selector);
+        token.transfer(bob, 1);
+
+        // Week 1 balance is untouched
+        assertEq(token.balanceOf(alice, week1), 6);
+    }
+
+    // ============ approve() / allowance() / transferFrom() Tests ============
+
+    function test_Approve_ZeroAmountSucceeds() public {
+        // ERC-20 standard allows approve(spender, 0) to explicitly clear an allowance.
+        vm.prank(alice);
+        token.approve(bob, 0);
+
+        assertEq(token.allowance(alice, bob), 0);
+    }
+
+    function test_Approve_OverwritesPreviousAllowance() public {
+        // A second approve() must overwrite the first — no accumulation.
+        vm.startPrank(alice);
+        token.approve(bob, 5);
+        token.approve(bob, 2);
+        vm.stopPrank();
+
+        assertEq(token.allowance(alice, bob), 2);
+    }
+
+    function test_TransferFrom_ExactAllowanceLeavesAllowanceAtZero() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+
+        vm.prank(alice);
+        token.approve(bob, 4);
+
+        vm.prank(bob);
+        token.transferFrom(alice, bob, 4);
+
+        assertEq(token.allowance(alice, bob), 0);
+        assertEq(token.balanceOf(alice, week), 2);
+        assertEq(token.balanceOf(bob, week), 4);
+    }
+
+    function test_TransferFrom_RevertsWhenAllowanceTooLow() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+
+        vm.prank(alice);
+        token.approve(bob, 1);
+
+        vm.prank(bob);
+        vm.expectRevert(MealSwipeToken.InsufficientAllowance.selector);
+        token.transferFrom(alice, bob, 2);
+    }
+
+    function test_TransferFrom_RevertsWhenAllowanceSufficientButBalanceLow() public {
+        // Allowance is large but the on-chain balance for the current week is less.
+        uint256 week = token.currentWeek();
+        token.mint(alice, 3, week);
+
+        vm.prank(alice);
+        token.approve(bob, 6);
+
+        vm.prank(bob);
+        vm.expectRevert(MealSwipeToken.InsufficientBalance.selector);
+        token.transferFrom(alice, bob, 4);
+    }
+
+    function test_TransferFrom_AllowancePersistsAcrossWeeksButBalanceDoesNot() public {
+        // approve() is not week-scoped, so the allowance carries into week 2.
+        // However, week-1 tokens are not visible in week 2, so the call reverts.
+        uint256 week1 = token.currentWeek();
+        token.mint(alice, 6, week1);
+
+        vm.prank(alice);
+        token.approve(bob, 6);
+
+        vm.warp(block.timestamp + 7 days); // move to week 2, no new mint
+
+        assertEq(token.allowance(alice, bob), 6); // allowance still intact
+
+        vm.prank(bob);
+        vm.expectRevert(MealSwipeToken.InsufficientBalance.selector);
+        token.transferFrom(alice, bob, 1);
+    }
+
+    function test_TransferFrom_RevertsOnZeroToAddress() public {
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+
+        vm.prank(alice);
+        token.approve(bob, 6);
+
+        vm.prank(bob);
+        vm.expectRevert(MealSwipeToken.ZeroAddress.selector);
+        token.transferFrom(alice, address(0), 1);
+    }
+
+    function test_TransferFrom_FromZeroAddressRevertsInsufficientAllowance() public {
+        // There is no explicit `from == address(0)` guard. The contract reaches
+        // the allowance check first: allowances[address(0)][caller] is 0, so it
+        // reverts InsufficientAllowance before any balance logic is reached.
+        vm.prank(bob);
+        vm.expectRevert(MealSwipeToken.InsufficientAllowance.selector);
+        token.transferFrom(address(0), bob, 1);
     }
 
     // ============ approveDining / revokeDining Tests ============
@@ -384,6 +554,43 @@ contract MealSwipeTokenTest is Test {
         vm.prank(diningHall);
         vm.expectRevert(MealSwipeToken.ZeroAddress.selector);
         token.redeemSwipe(address(0));
+    }
+
+    // ============ redeemSwipe() Edge Cases ============
+
+    function test_RedeemSwipe_EdgeCase_ExactlyOneSwipeDrainsBothBalanceAndSupplyToZero() public {
+        // Redeeming the only swipe a wallet holds must cleanly zero both the
+        // per-wallet balance and the week's totalSupplyByWeek in one call.
+        uint256 week = token.currentWeek();
+        token.mint(alice, 1, week);
+        token.approveDining(diningHall);
+
+        vm.prank(diningHall);
+        token.redeemSwipe(alice);
+
+        assertEq(token.balanceOf(alice, week), 0);
+        assertEq(token.totalSupplyByWeek(week), 0);
+    }
+
+    function test_RedeemSwipe_EdgeCase_RevokedAfterSuccessfulRedeemPreventsNextRedeem() public {
+        // Confirm the full approve → use → revoke lifecycle:
+        // a successful redeem before revocation does not keep the dining address active.
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+        token.approveDining(diningHall);
+
+        vm.prank(diningHall);
+        token.redeemSwipe(alice); // succeeds — balance now 5
+        assertEq(token.balanceOf(alice, week), 5);
+
+        token.revokeDining(diningHall);
+
+        vm.prank(diningHall);
+        vm.expectRevert(MealSwipeToken.NotApprovedDining.selector);
+        token.redeemSwipe(alice);
+
+        // Balance must be unchanged after the failed second attempt
+        assertEq(token.balanceOf(alice, week), 5);
     }
 
     // ============ burnAll Tests ============

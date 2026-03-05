@@ -16,6 +16,9 @@ contract MealSwipeToken {
     /// @notice Maps (walletAddress, weekEpoch) → token balance. Core balance store.
     mapping(address => mapping(uint256 => uint256)) private balances;
 
+    /// @notice Maps (owner, spender) → approved token allowance. Used by transferFrom.
+    mapping(address => mapping(address => uint256)) private allowances;
+
     /// @notice Addresses approved to call redeemSwipe(). Represents dining hall terminals.
     mapping(address => bool) public approvedDining;
 
@@ -48,6 +51,9 @@ contract MealSwipeToken {
     /// @notice Emitted when all tokens for a week epoch are burned at rollover
     event SwipesBurned(uint256 week, uint256 totalBurned);
 
+    /// @notice Emitted when a spender is approved to transfer tokens on behalf of an owner
+    event Approval(address indexed owner, address indexed spender, uint256 amount);
+
     /// @notice Emitted when a new dining address is approved
     event DiningApproved(address indexed diningAddress);
 
@@ -70,6 +76,9 @@ contract MealSwipeToken {
 
     /// @notice Thrown when a zero address is passed where a real address is required
     error ZeroAddress();
+
+    /// @notice Thrown when transferFrom caller has insufficient allowance
+    error InsufficientAllowance();
 
     /// @notice Thrown when burnAll() is called for a week that has already been burned
     error EpochAlreadyBurned(uint256 week);
@@ -162,7 +171,8 @@ contract MealSwipeToken {
     /// @dev Used for peer-to-peer swipe sending (the "Send Swipe to Friend" feature)
     /// @param to The address to transfer tokens to
     /// @param amount The number of tokens to transfer
-    function transfer(address to, uint256 amount) external {
+    /// @return True on success
+    function transfer(address to, uint256 amount) external returns (bool) {
         if (to == address(0)) revert ZeroAddress();
         if (amount == 0) revert InvalidAmount();
 
@@ -173,9 +183,50 @@ contract MealSwipeToken {
         balances[to][week] += amount;
 
         emit Transfer(msg.sender, to, amount, week);
+        return true;
+    }
+
+    /// @notice Approves a spender to transfer tokens on behalf of msg.sender
+    /// @param spender The address to approve
+    /// @param amount The number of tokens the spender may transfer
+    /// @return True on success
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowances[msg.sender][spender] = amount;
+        emit Approval(msg.sender, spender, amount);
+        return true;
+    }
+
+    /// @notice Transfers tokens from one address to another using an allowance
+    /// @dev Caller must have been approved by `from` via approve()
+    /// @param from The address to transfer tokens from
+    /// @param to The address to transfer tokens to
+    /// @param amount The number of tokens to transfer
+    /// @return True on success
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        if (to == address(0)) revert ZeroAddress();
+        if (amount == 0) revert InvalidAmount();
+        if (allowances[from][msg.sender] < amount) revert InsufficientAllowance();
+
+        uint256 week = block.timestamp / 7 days;
+        if (balances[from][week] < amount) revert InsufficientBalance();
+
+        allowances[from][msg.sender] -= amount;
+        balances[from][week] -= amount;
+        balances[to][week] += amount;
+
+        emit Transfer(from, to, amount, week);
+        return true;
     }
 
     // ============ View Functions ============
+
+    /// @notice Returns the remaining allowance a spender has on behalf of an owner
+    /// @param owner_ The address that approved the allowance
+    /// @param spender The address approved to spend
+    /// @return The remaining allowance
+    function allowance(address owner_, address spender) external view returns (uint256) {
+        return allowances[owner_][spender];
+    }
 
     /// @notice Returns the current week epoch
     /// @return The current week as block.timestamp / 7 days

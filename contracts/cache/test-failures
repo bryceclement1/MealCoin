@@ -1,1 +1,1 @@
-test_Transfer_IsScopedToCurrentWeek
+test_Mint_EdgeCase_PastWeekEpochSucceeds

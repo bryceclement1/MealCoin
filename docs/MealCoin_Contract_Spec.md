@@ -47,8 +47,10 @@ This produces an incrementing integer (e.g. week 0, week 1, week 2...) that adva
 | `owner` | `address` | `public` | Deployer address. Has exclusive rights to mint and manage approved dining addresses. |
 | `currentWeek` | `uint256` | `public` | The current week epoch, computed from `block.timestamp / 7 days`. Updated on each epoch-sensitive call. |
 | `balances` | `mapping(address => mapping(uint256 => uint256))` | `private` | Maps `(walletAddress, weekEpoch)` → token balance. Core balance store. |
+| `allowances` | `mapping(address => mapping(address => uint256))` | `private` | Maps `(owner, spender)` → approved token allowance. Used by `transferFrom`. |
 | `approvedDining` | `mapping(address => bool)` | `public` | Addresses approved to call `redeemSwipe()`. Represents dining hall terminals. |
 | `totalSupplyByWeek` | `mapping(uint256 => uint256)` | `public` | Total tokens minted for each week epoch. Used for accounting and burn verification. |
+| `burnedWeeks` | `mapping(uint256 => bool)` | `public` | Tracks which weeks have been burned. When `true`, `balanceOf` returns 0 for that week. |
 | `name` | `string` | `public` | Token name: `"MealSwipeToken"` |
 | `symbol` | `string` | `public` | Token symbol: `"MST"` |
 | `decimals` | `uint8` | `public` | `0` — meal swipes are whole units, no fractional swipes |
@@ -60,6 +62,7 @@ This produces an incrementing integer (e.g. week 0, week 1, week 2...) that adva
 | Event | Parameters | Emitted When |
 |-------|-----------|--------------|
 | `Transfer` | `address indexed from, address indexed to, uint256 amount, uint256 week` | Any token transfer between addresses |
+| `Approval` | `address indexed owner, address indexed spender, uint256 amount` | A spender is approved to transfer tokens on behalf of an owner |
 | `Mint` | `address indexed to, uint256 amount, uint256 week` | Tokens are minted to a student's wallet |
 | `SwipeRedeemed` | `address indexed wallet, uint256 week` | One swipe is burned at a dining location |
 | `SwipesBurned` | `uint256 week, uint256 totalBurned` | All tokens for a week epoch are burned at rollover |
@@ -77,6 +80,7 @@ Use custom errors (cheaper gas than `require` strings):
 | `NotOwner()` | Caller is not `owner` |
 | `NotApprovedDining()` | Caller is not in `approvedDining` |
 | `InsufficientBalance()` | Transfer or redeem would exceed the sender's balance for `currentWeek` |
+| `InsufficientAllowance()` | `transferFrom` caller has less allowance than the requested amount |
 | `InvalidAmount()` | Amount is 0 or exceeds 6 |
 | `ZeroAddress()` | A zero address is passed where a real address is required |
 | `EpochAlreadyBurned(uint256 week)` | `burnAll()` is called for a week that has already been burned |
@@ -116,20 +120,69 @@ Mints `amount` tokens to `to` for the given `week` epoch. Called by the admin at
 
 #### `transfer(address to, uint256 amount)`
 ```
-function transfer(address to, uint256 amount) external
+function transfer(address to, uint256 amount) external returns (bool)
 ```
-Transfers `amount` tokens from `msg.sender` to `to`, scoped to `currentWeek`. Used for direct peer-to-peer swipe sending (the "Send Swipe to Friend" feature).
+Transfers `amount` tokens from `msg.sender` to `to`, scoped to `currentWeek`. Used for direct peer-to-peer swipe sending (the "Send Swipe to Friend" feature). Returns `true` on success.
 
-**Access:** Any verified student  
+**Access:** Any verified student
 **Reverts:** `ZeroAddress`, `InvalidAmount` (if amount is 0), `InsufficientBalance`
 
 **Logic:**
 1. Check `to != address(0)`
 2. Check `amount > 0`
-3. Check `balances[msg.sender][currentWeek] >= amount`
-4. `balances[msg.sender][currentWeek] -= amount`
-5. `balances[to][currentWeek] += amount`
-6. Emit `Transfer(msg.sender, to, amount, currentWeek)`
+3. Compute `week = block.timestamp / 7 days`
+4. Check `balances[msg.sender][week] >= amount`
+5. `balances[msg.sender][week] -= amount`
+6. `balances[to][week] += amount`
+7. Emit `Transfer(msg.sender, to, amount, week)`
+8. Return `true`
+
+---
+
+#### `approve(address spender, uint256 amount)`
+```
+function approve(address spender, uint256 amount) external returns (bool)
+```
+Approves `spender` to transfer up to `amount` tokens on behalf of `msg.sender`. Required before the Marketplace can escrow a seller's tokens via `transferFrom`. Returns `true` on success.
+
+**Access:** Any address
+**Reverts:** none
+
+**Logic:**
+1. `allowances[msg.sender][spender] = amount`
+2. Emit `Approval(msg.sender, spender, amount)`
+3. Return `true`
+
+---
+
+#### `transferFrom(address from, address to, uint256 amount)`
+```
+function transferFrom(address from, address to, uint256 amount) external returns (bool)
+```
+Transfers `amount` tokens from `from` to `to` using the caller's allowance, scoped to `currentWeek`. Called by the Marketplace to pull tokens into escrow when a sell offer is created. Returns `true` on success.
+
+**Access:** Any address with sufficient allowance from `from`
+**Reverts:** `ZeroAddress`, `InvalidAmount`, `InsufficientAllowance`, `InsufficientBalance`
+
+**Logic:**
+1. Check `to != address(0)`
+2. Check `amount > 0`
+3. Check `allowances[from][msg.sender] >= amount`
+4. Compute `week = block.timestamp / 7 days`
+5. Check `balances[from][week] >= amount`
+6. `allowances[from][msg.sender] -= amount`
+7. `balances[from][week] -= amount`
+8. `balances[to][week] += amount`
+9. Emit `Transfer(from, to, amount, week)`
+10. Return `true`
+
+---
+
+#### `allowance(address owner, address spender)`
+```
+function allowance(address owner, address spender) external view returns (uint256)
+```
+Returns the remaining number of tokens that `spender` is approved to transfer on behalf of `owner`.
 
 ---
 
@@ -161,11 +214,7 @@ Burns all tokens for the given `week` epoch. Called at Saturday 11:59pm to enfor
 **Access:** `owner` only  
 **Reverts:** `NotOwner`, `EpochAlreadyBurned` (if this week has already been burned)
 
-**Implementation note:** Because iterating over all addresses is not feasible on-chain, implement this with a `burnedWeeks` mapping. When `burnedWeeks[week] == true`, any call to `balanceOf(address, week)` returns 0 regardless of the stored balance. This avoids the need to iterate.
-
-```solidity
-mapping(uint256 => bool) public burnedWeeks;
-```
+**Implementation note:** Because iterating over all addresses is not feasible on-chain, the `burnedWeeks` mapping is used. When `burnedWeeks[week] == true`, any call to `balanceOf(address, week)` returns 0 regardless of the stored balance. This avoids the need to iterate.
 
 **Logic:**
 1. Check `msg.sender == owner`
@@ -227,11 +276,15 @@ Returns `block.timestamp / 7 days`. Convenience function for the frontend and in
 |----------|-------|-----------------|-------------|
 | `mint` | ✅ | ❌ | ❌ |
 | `transfer` | ✅ | ✅ | ✅ |
+| `transferFrom` | ✅ | ✅ | ✅ (with allowance) |
+| `approve` | ✅ | ✅ | ✅ |
 | `redeemSwipe` | ❌ | ✅ | ❌ |
 | `burnAll` | ✅ | ❌ | ❌ |
 | `approveDining` | ✅ | ❌ | ❌ |
 | `revokeDining` | ✅ | ❌ | ❌ |
 | `balanceOf` | ✅ | ✅ | ✅ (read-only) |
+| `allowance` | ✅ | ✅ | ✅ (read-only) |
+| `getCurrentWeek` | ✅ | ✅ | ✅ (read-only) |
 
 ---
 
@@ -387,22 +440,24 @@ Accepts an existing pending offer. Executes the swap atomically — swipes go to
 **Reverts:** `OfferNotFound`, `OfferNotPending`, `OfferIsExpired`, `CannotAcceptOwnOffer`, `InsufficientTokenAllowance`
 
 **Logic for accepting an Ask (sell offer):**
-1. Load offer — check it exists, is `Pending`, and `block.timestamp < expiresAt`
-2. Check `msg.sender != offer.creator`
-3. Compute `totalPayment = offer.swipeCount * offer.pricePerSwipe`
-4. Check `msg.sender` has approved this contract to spend `totalPayment` of `paymentToken`
-5. Transfer `totalPayment` from `msg.sender` to `offer.creator` (seller gets paid)
-6. Transfer `offer.swipeCount` tokens from this contract to `msg.sender` (buyer gets swipes)
-7. Set `offers[offerId].status = OfferStatus.Accepted`
-8. Emit `OfferAccepted(offerId, msg.sender)`
+1. Check offer exists (`offerId > 0 && offerId <= offerCount`)
+2. Check `offer.status == Pending`
+3. Check `block.timestamp < offer.expiresAt`
+4. Check `msg.sender != offer.creator`
+5. Compute `totalPayment = offer.swipeCount * offer.pricePerSwipe`
+6. Check `msg.sender` has approved this contract to spend `totalPayment` of `paymentToken`
+7. Set `offers[offerId].status = OfferStatus.Accepted` **(CEI: state change before external calls)**
+8. `paymentToken.transferFrom(msg.sender, offer.creator, totalPayment)` — buyer pays seller directly
+9. `mealSwipeToken.transfer(msg.sender, offer.swipeCount)` — market releases escrowed tokens to buyer
+10. Emit `OfferAccepted(offerId, msg.sender)`
 
 **Logic for accepting a Bid (buy offer):**
-1. Same existence and expiry checks
+1. Same existence, status, and expiry checks
 2. Check `msg.sender != offer.creator`
 3. Check `msg.sender` has approved this contract to spend `offer.swipeCount` tokens
-4. Transfer `offer.swipeCount` tokens from `msg.sender` to `offer.creator` (buyer gets swipes)
-5. Transfer `totalPayment` from this contract to `msg.sender` (seller gets paid)
-6. Set `offers[offerId].status = OfferStatus.Accepted`
+4. Set `offers[offerId].status = OfferStatus.Accepted` **(CEI: state change before external calls)**
+5. `mealSwipeToken.transferFrom(msg.sender, offer.creator, offer.swipeCount)` — seller provides tokens to buyer
+6. `paymentToken.transfer(msg.sender, totalPayment)` — market releases escrowed USDC to seller
 7. Emit `OfferAccepted(offerId, msg.sender)`
 
 ---
@@ -416,17 +471,14 @@ Cancels a pending offer and returns the escrowed assets to the creator.
 **Access:** Offer creator only  
 **Reverts:** `OfferNotFound`, `OfferNotPending`, `NotOfferCreator`
 
-**Logic for cancelling an Ask:**
-1. Check offer exists and is `Pending`
-2. Check `msg.sender == offer.creator`
-3. Transfer `offer.swipeCount` tokens from this contract back to `offer.creator`
-4. Set `offers[offerId].status = OfferStatus.Cancelled`
-5. Emit `OfferCancelled(offerId, msg.sender)`
-
-**Logic for cancelling a Bid:**
-1. Same checks
-2. Transfer `totalPayment` from this contract back to `offer.creator`
-3. Set status and emit
+**Logic (shared for Ask and Bid):**
+1. Check offer exists (`offerId > 0 && offerId <= offerCount`)
+2. Check `offer.status == Pending`
+3. Check `msg.sender == offer.creator`
+4. Set `offers[offerId].status = OfferStatus.Cancelled` **(CEI: state change before external calls)**
+5. If Ask: `mealSwipeToken.transfer(offer.creator, offer.swipeCount)` — return escrowed tokens
+6. If Bid: `paymentToken.transfer(offer.creator, offer.swipeCount * offer.pricePerSwipe)` — return escrowed USDC
+7. Emit `OfferCancelled(offerId, msg.sender)`
 
 ---
 
@@ -446,15 +498,13 @@ Private helper. Computes the Unix timestamp of the upcoming Saturday at 23:59:59
 
 **Logic:**
 ```solidity
-// Unix epoch starts on a Thursday (day 4)
-// Days since epoch: block.timestamp / 1 days
-// Day of week (0=Thu, 1=Fri, 2=Sat, ...): (block.timestamp / 1 days + 4) % 7
-// Days until Saturday: (2 - dayOfWeek + 7) % 7  — if already Saturday, returns 0
-// Midnight of that Saturday: start of that day + 86399 seconds (23:59:59)
+// Unix epoch (Jan 1 1970) started on a Thursday.
+// Adding 4 shifts the remainder into standard week numbering: 0=Sun, 1=Mon, ... 6=Sat.
+// (6 - dayOfWeek) % 7 gives days until Saturday; 0 if today is already Saturday.
 uint256 dayOfWeek = (block.timestamp / 1 days + 4) % 7;
 uint256 daysUntilSaturday = (6 - dayOfWeek) % 7;
 uint256 startOfSaturday = (block.timestamp / 1 days + daysUntilSaturday) * 1 days;
-return startOfSaturday + 86399;
+return startOfSaturday + 86399; // 23:59:59
 ```
 
 > **Note:** If called on a Saturday it returns tonight's 23:59:59, which is correct — offers posted on Saturday expire the same night.
@@ -493,10 +543,15 @@ createSellOffer() or createBuyOffer()
 `acceptOffer()` and `cancelOffer()` make external token transfers. Follow the checks-effects-interactions pattern strictly — update `offer.status` before making any external calls to prevent reentrancy attacks.
 
 ```solidity
-// ✅ Correct order
-offers[offerId].status = OfferStatus.Accepted;  // state change first
-paymentToken.transfer(offer.creator, totalPayment);  // external call after
-mealSwipeToken.transfer(msg.sender, offer.swipeCount);
+// ✅ Correct order — Ask path
+offers[offerId].status = OfferStatus.Accepted;                             // state change first
+paymentToken.transferFrom(msg.sender, offer.creator, totalPayment);        // buyer pays seller
+mealSwipeToken.transfer(msg.sender, offer.swipeCount);                     // market releases tokens
+
+// ✅ Correct order — Bid path
+offers[offerId].status = OfferStatus.Accepted;                             // state change first
+mealSwipeToken.transferFrom(msg.sender, offer.creator, offer.swipeCount);  // seller provides tokens
+paymentToken.transfer(msg.sender, totalPayment);                           // market releases payment
 ```
 
 **Price cap enforcement**
@@ -562,28 +617,42 @@ interface IMealSwipeToken {
 ## Foundry Test Checklist
 
 ### MealSwipeToken Tests
-- [ ] `mint()` — admin can mint, non-admin reverts
-- [ ] `mint()` — amount > 6 reverts
-- [ ] `transfer()` — correct balances after transfer
-- [ ] `transfer()` — reverts if sender balance insufficient
-- [ ] `redeemSwipe()` — approved dining can redeem, others revert
-- [ ] `redeemSwipe()` — reverts if wallet has 0 balance
-- [ ] `burnAll()` — `balanceOf` returns 0 for burned week
-- [ ] `burnAll()` — `SwipesBurned` event emitted with correct total
-- [ ] `burnAll()` — calling twice on same week reverts with `EpochAlreadyBurned`
-- [ ] `approveDining()` / `revokeDining()` — access control works correctly
+- [x] `mint()` — admin can mint, non-admin reverts
+- [x] `mint()` — amount > 6 reverts
+- [x] `transfer()` — correct balances after transfer
+- [x] `transfer()` — reverts if sender balance insufficient
+- [x] `approve()` / `allowance()` — allowance is set and readable
+- [x] `transferFrom()` — transfers with valid allowance, decrements allowance
+- [x] `transferFrom()` — reverts with insufficient allowance
+- [x] `redeemSwipe()` — approved dining can redeem, others revert
+- [x] `redeemSwipe()` — reverts if wallet has 0 balance
+- [x] `burnAll()` — `balanceOf` returns 0 for burned week
+- [x] `burnAll()` — `SwipesBurned` event emitted with correct total
+- [x] `burnAll()` — calling twice on same week reverts with `EpochAlreadyBurned`
+- [x] `approveDining()` / `revokeDining()` — access control works correctly
+- [x] Full flow: mint → transfer → redeemSwipe → burnAll
 
 ### Marketplace Tests
-- [ ] `createSellOffer()` — tokens escrowed, `OfferCreated` emitted
-- [ ] `createSellOffer()` — reverts if swipeCount > 6
-- [ ] `createSellOffer()` — reverts if price > $12
-- [ ] `createBuyOffer()` — payment escrowed, `OfferCreated` emitted
-- [ ] `acceptOffer()` (Ask) — buyer gets swipes, seller gets payment
-- [ ] `acceptOffer()` (Bid) — seller gets payment, buyer gets swipes
-- [ ] `acceptOffer()` — reverts if offer already accepted
-- [ ] `acceptOffer()` — reverts if offer expired (`vm.warp` past `expiresAt`)
-- [ ] `acceptOffer()` — reverts if caller is the offer creator
-- [ ] `cancelOffer()` — creator gets escrowed assets back
-- [ ] `cancelOffer()` — non-creator reverts
-- [ ] `cancelOffer()` — accepted offer cannot be cancelled
-- [ ] Full flow: mint → createSellOffer → acceptOffer → redeemSwipe → burnAll
+- [x] `_getNextSaturdayMidnight()` — correct result from every day of the week
+- [x] `createSellOffer()` — tokens escrowed, `OfferCreated` emitted
+- [x] `createSellOffer()` — reverts if swipeCount > 6
+- [x] `createSellOffer()` — reverts if price > $12
+- [x] `createBuyOffer()` — payment escrowed, `OfferCreated` emitted
+- [x] `createBuyOffer()` — reverts if swipeCount > 6
+- [x] `createBuyOffer()` — reverts if price > $12
+- [x] `acceptOffer()` (Ask) — buyer gets swipes, seller gets payment
+- [x] `acceptOffer()` (Ask) — reverts if offer already accepted
+- [x] `acceptOffer()` (Ask) — reverts if offer expired (`vm.warp` past `expiresAt`)
+- [x] `acceptOffer()` (Ask) — reverts if caller is the offer creator
+- [x] `acceptOffer()` (Ask) — reverts without payment allowance
+- [x] `acceptOffer()` (Bid) — seller gets payment, buyer gets swipes
+- [x] `acceptOffer()` (Bid) — reverts if offer already accepted
+- [x] `acceptOffer()` (Bid) — reverts if offer expired
+- [x] `acceptOffer()` (Bid) — reverts if caller is the offer creator
+- [x] `acceptOffer()` (Bid) — reverts without token allowance
+- [x] `cancelOffer()` (Ask) — creator gets escrowed tokens back
+- [x] `cancelOffer()` (Bid) — creator gets escrowed payment back
+- [x] `cancelOffer()` — non-creator reverts
+- [x] `cancelOffer()` — already-cancelled offer reverts with `OfferNotPending`
+- [x] `getOffer()` — returns correct struct, reflects status changes, reverts for invalid ID
+- [x] Full flow: mint → createSellOffer → acceptOffer → redeemSwipe → burnAll
