@@ -113,6 +113,13 @@ contract Marketplace {
     /// @notice A student attempts to accept their own offer
     error CannotAcceptOwnOffer();
 
+    /// @notice claimExpiredOffer called on an offer that hasn't expired yet
+    error OfferNotYetExpired(uint256 offerId);
+
+    /// @notice createSellOffer/createBuyOffer called when computed expiresAt is already in the past
+    /// @dev Happens between 23:55:00 and midnight on Saturday — the 5-minute burnAll buffer window
+    error OfferAlreadyExpired();
+
     // ============ Constructor ============
 
     /// @notice Deploys the Marketplace contract
@@ -140,6 +147,8 @@ contract Marketplace {
         mealSwipeToken.transferFrom(msg.sender, address(this), swipeCount);
 
         uint256 expiresAt = _getNextSaturdayMidnight();
+        if (expiresAt <= block.timestamp) revert OfferAlreadyExpired();
+
         uint256 offerId = ++offerCount;
 
         offers[offerId] = Offer({
@@ -171,6 +180,8 @@ contract Marketplace {
         paymentToken.transferFrom(msg.sender, address(this), totalPayment);
 
         uint256 expiresAt = _getNextSaturdayMidnight();
+        if (expiresAt <= block.timestamp) revert OfferAlreadyExpired();
+
         uint256 offerId = ++offerCount;
 
         offers[offerId] = Offer({
@@ -245,6 +256,33 @@ contract Marketplace {
         emit OfferCancelled(offerId, msg.sender);
     }
 
+    /// @notice Returns escrowed assets to the creator of an expired offer. Callable by anyone.
+    /// @dev Allows an admin keeper (or any caller) to automatically process expired offers
+    ///      before burnAll fires, so creators recover their tokens without being online.
+    ///      Sets status to Expired (distinct from Cancelled) and emits OfferExpired.
+    ///      Follows CEI: status is updated before any external transfer.
+    /// @param offerId The ID of the expired offer to process
+    function claimExpiredOffer(uint256 offerId) external {
+        if (offerId == 0 || offerId > offerCount) revert OfferNotFound(offerId);
+
+        Offer storage offer = offers[offerId];
+
+        if (offer.status != OfferStatus.Pending) revert OfferNotPending(offerId);
+        if (block.timestamp < offer.expiresAt) revert OfferNotYetExpired(offerId);
+
+        // Effects before interactions (CEI)
+        offer.status = OfferStatus.Expired;
+
+        if (offer.offerType == OfferType.Ask) {
+            mealSwipeToken.transfer(offer.creator, offer.swipeCount);
+        } else {
+            uint256 totalPayment = offer.swipeCount * offer.pricePerSwipe;
+            paymentToken.transfer(offer.creator, totalPayment);
+        }
+
+        emit OfferExpired(offerId);
+    }
+
     /// @notice Returns the full Offer struct for a given offerId
     /// @param offerId The ID of the offer to retrieve
     /// @return The Offer struct
@@ -263,6 +301,6 @@ contract Marketplace {
         uint256 dayOfWeek = (block.timestamp / 1 days + 4) % 7;
         uint256 daysUntilSaturday = (6 - dayOfWeek) % 7;
         uint256 startOfSaturday = (block.timestamp / 1 days + daysUntilSaturday) * 1 days;
-        return startOfSaturday + 86399;
+        return startOfSaturday + 86100; // 23:55:00 — 5-minute buffer before burnAll at 23:59:59
     }
 }

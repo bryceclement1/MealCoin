@@ -671,6 +671,59 @@ contract MealSwipeTokenTest is Test {
         token.burnAll(week);
     }
 
+    // ============ burnAll() Edge Cases ============
+
+    function test_BurnAll_EdgeCase_FutureNeverMintedWeekSucceeds() public {
+        // burnAll has no restriction on which week is burned — a future epoch
+        // with zero supply should succeed and mark that week as burned.
+        uint256 futureWeek = token.currentWeek() + 10;
+
+        token.burnAll(futureWeek);
+
+        assertTrue(token.burnedWeeks(futureWeek));
+        assertEq(token.totalSupplyByWeek(futureWeek), 0);
+        assertEq(token.balanceOf(alice, futureWeek), 0);
+    }
+
+    function test_BurnAll_EdgeCase_ReMintIntoBurnedWeekReverts() public {
+        // mint() now guards against burned weeks — minting into an already-burned
+        // epoch reverts EpochAlreadyBurned, preventing permanently inaccessible tokens.
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+        token.burnAll(week);
+
+        vm.expectRevert(abi.encodeWithSelector(MealSwipeToken.EpochAlreadyBurned.selector, week));
+        token.mint(alice, 3, week);
+    }
+
+    function test_BurnAll_EdgeCase_TransferAfterBurnInSameEpochReverts() public {
+        // transfer() checks burnedWeeks before the raw balance, so tokens in a
+        // burned week cannot be moved even within the same block.
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+        token.burnAll(week);
+
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(MealSwipeToken.EpochAlreadyBurned.selector, week));
+        token.transfer(bob, 1);
+    }
+
+    function test_BurnAll_EdgeCase_TransferFromAfterBurnInSameEpochReverts() public {
+        // transferFrom() also has the burnedWeeks guard — allowance cannot be
+        // exercised against a burned week's tokens.
+        uint256 week = token.currentWeek();
+        token.mint(alice, 6, week);
+
+        vm.prank(alice);
+        token.approve(bob, 6);
+
+        token.burnAll(week);
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(MealSwipeToken.EpochAlreadyBurned.selector, week));
+        token.transferFrom(alice, bob, 1);
+    }
+
     // ============ getCurrentWeek Tests ============
 
     function test_GetCurrentWeek_MatchesTimestamp() public view {
@@ -681,6 +734,48 @@ contract MealSwipeTokenTest is Test {
         uint256 weekBefore = token.getCurrentWeek();
         vm.warp(block.timestamp + 7 days);
         assertEq(token.getCurrentWeek(), weekBefore + 1);
+    }
+
+    // ============ Week Epoch Boundary Edge Cases ============
+
+    function test_EpochBoundary_WarpToExactEpochStartIncrementsWeek() public {
+        // Warp to the precise first second of the next epoch (not just +7 days from
+        // an arbitrary mid-epoch position). Confirms the boundary is inclusive —
+        // block.timestamp == (N+1) * 7 days belongs to epoch N+1, not N.
+        uint256 weekN = token.getCurrentWeek();
+        uint256 nextEpochStart = (weekN + 1) * 7 days;
+
+        vm.warp(nextEpochStart);
+
+        assertEq(token.getCurrentWeek(), weekN + 1);
+    }
+
+    function test_EpochBoundary_WeekNBalanceReadableInWeekNPlusOne() public {
+        // balanceOf is not restricted to the current epoch — historical balances
+        // remain readable after a week rolls over (as long as the week hasn't been burned).
+        // The balance is readable but unusable: transfer() uses live block.timestamp / 7 days
+        // so the caller's week-(N+1) balance is 0, causing InsufficientBalance.
+        uint256 weekN = token.getCurrentWeek();
+        token.mint(alice, 6, weekN);
+
+        vm.warp((weekN + 1) * 7 days); // move to epoch N+1
+
+        // Week N balance is still readable
+        assertEq(token.balanceOf(alice, weekN), 6);
+        // Week N+1 balance is 0 (nothing minted there)
+        assertEq(token.balanceOf(alice, weekN + 1), 0);
+
+        // Transfer reverts because it operates on the current (N+1) balance
+        vm.prank(alice);
+        vm.expectRevert(MealSwipeToken.InsufficientBalance.selector);
+        token.transfer(bob, 1);
+    }
+
+    function testFuzz_EpochBoundary_GetCurrentWeekMatchesTimestampAtAnyPoint(uint32 offset) public {
+        // getCurrentWeek() must equal block.timestamp / 7 days at any arbitrary point in time.
+        // uint32 bounds the offset to ~136 years, safely within uint256 range.
+        vm.warp(block.timestamp + offset);
+        assertEq(token.getCurrentWeek(), block.timestamp / 7 days);
     }
 
     // ============ Integration Test ============

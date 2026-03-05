@@ -106,6 +106,7 @@ contract MealSwipeToken {
         if (msg.sender != owner) revert NotOwner();
         if (to == address(0)) revert ZeroAddress();
         if (amount == 0 || amount > 6) revert InvalidAmount();
+        if (burnedWeeks[week]) revert EpochAlreadyBurned(week);
 
         balances[to][week] += amount;
         totalSupplyByWeek[week] += amount;
@@ -157,6 +158,7 @@ contract MealSwipeToken {
         if (wallet == address(0)) revert ZeroAddress();
 
         uint256 week = block.timestamp / 7 days;
+        if (burnedWeeks[week]) revert EpochAlreadyBurned(week);
         if (balances[wallet][week] < 1) revert InsufficientBalance();
 
         balances[wallet][week] -= 1;
@@ -177,6 +179,7 @@ contract MealSwipeToken {
         if (amount == 0) revert InvalidAmount();
 
         uint256 week = block.timestamp / 7 days;
+        if (burnedWeeks[week]) revert EpochAlreadyBurned(week);
         if (balances[msg.sender][week] < amount) revert InsufficientBalance();
 
         balances[msg.sender][week] -= amount;
@@ -208,6 +211,7 @@ contract MealSwipeToken {
         if (allowances[from][msg.sender] < amount) revert InsufficientAllowance();
 
         uint256 week = block.timestamp / 7 days;
+        if (burnedWeeks[week]) revert EpochAlreadyBurned(week);
         if (balances[from][week] < amount) revert InsufficientBalance();
 
         allowances[from][msg.sender] -= amount;
