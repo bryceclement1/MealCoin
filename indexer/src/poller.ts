@@ -7,6 +7,8 @@ import { handleOfferCreated } from './handlers/offerCreated'
 import { handleOfferAccepted } from './handlers/offerAccepted'
 import { handleOfferCancelled } from './handlers/offerCancelled'
 import { handleOfferExpired } from './handlers/offerExpired'
+import { handleSwipeRedeemed } from './handlers/swipeRedeemed'
+import { handleSwipesBurned } from './handlers/swipesBurned'
 
 // Structural type — avoids mismatch between chain-specific PublicClient and generic PublicClient
 interface RpcClient {
@@ -49,6 +51,8 @@ export async function pollOnce(
         case 'OfferAccepted':  await handleOfferAccepted(log);  break
         case 'OfferCancelled': await handleOfferCancelled(log); break
         case 'OfferExpired':   await handleOfferExpired(log);   break
+        case 'SwipeRedeemed':  await handleSwipeRedeemed(log);  break
+        case 'SwipesBurned':   await handleSwipesBurned(log);   break
         default:               console.log(`[EVENT] ${log.eventName} tx ${log.transactionHash}`)
       }
       eventCount++
