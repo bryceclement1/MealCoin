@@ -64,6 +64,20 @@ These tables are created by ticket DB-01. Reproduced here for reference.
 | `tx_hash` | `text` | Transaction hash of `SwipeRedeemed` event. Unique — used for dedup. |
 | `redeemed_at` | `timestamptz` | Block timestamp of the redemption |
 
+### `verification_tokens`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | `uuid` PK | Generated |
+| `token` | `text` | UNIQUE. Random UUID used as the verification token. |
+| `wallet_address` | `text` | The wallet address being verified. |
+| `davidson_email` | `text` | The email address being verified. |
+| `used` | `boolean` | Default `false`. Set to `true` after the link is clicked. |
+| `expires_at` | `timestamptz` | 15 minutes after creation. |
+| `created_at` | `timestamptz` | Default `NOW()`. |
+
+**Note:** This table has already been created in Supabase — no migration needed.
+
 ---
 
 ## Shared Conventions
@@ -175,7 +189,7 @@ Returns `{ "bids": [] }` if no active bids.
 
 ### POST /api/verify
 
-Maps a student's wallet address to their Davidson email. Called by the frontend after wallet connection when the wallet is not yet verified.
+Step 1 of email verification. Validates the email exists in the student list, generates a one-time token, and sends a confirmation email. Does **not** map the wallet yet — that happens in `GET /api/verify/confirm`.
 
 **Request body:**
 ```json
@@ -190,9 +204,9 @@ Maps a student's wallet address to their Davidson email. Called by the frontend 
 - `davidson_email` must end in `@davidson.edu`
 - Both fields required
 
-**Response `200` — success:**
+**Response `200` — email sent:**
 ```json
-{ "success": true }
+{ "success": true, "message": "Verification email sent" }
 ```
 
 **Response `404` — email not in seed list:**
@@ -222,11 +236,50 @@ Maps a student's wallet address to their Davidson email. Called by the frontend 
 1. Validate both fields
 2. Lowercase `wallet_address`
 3. Look up `davidson_email` in `students` — 404 if not found
-4. If the record already has a `wallet_address` equal to the incoming address, return 200 (idempotent)
-5. If the record already has a different `wallet_address`, return 409
-6. Check if any other student record already has this `wallet_address` — 409 if so
-7. Update: `SET wallet_address = $1, verified_at = NOW() WHERE davidson_email = $2`
-8. Return 200
+4. If student already has this `wallet_address`, return 200 (idempotent — resend is fine)
+5. If student already has a different `wallet_address`, return 409
+6. Check if any other student has this `wallet_address` — 409 if so
+7. Generate a UUID token, insert into `verification_tokens` with `expires_at = NOW() + interval '15 minutes'`
+8. Send email via Resend to `davidson_email` with link: `<APP_URL>/onboarding/confirm?token=<token>`
+9. Return 200
+
+**Email sending:** Uses [Resend](https://resend.com). Requires `RESEND_API_KEY` and `APP_URL` env vars.
+
+---
+
+### GET /api/verify/confirm
+
+Step 2 of email verification. Called when the student clicks the link in their email. Validates the token and writes the wallet→email mapping to `students`.
+
+**Query params:**
+- `token` — the UUID token from the email link (required)
+
+**Response `302` — success, redirect to `/`:**
+Redirects to `APP_URL/` after writing the mapping.
+
+**Response `410` — token expired:**
+```json
+{ "error": "Verification link has expired — request a new one" }
+```
+
+**Response `400` — token invalid or already used:**
+```json
+{ "error": "Invalid or already-used verification link" }
+```
+
+**Response `400` — token missing:**
+```json
+{ "error": "Missing token" }
+```
+
+**Logic:**
+1. Read `token` from query string — 400 if missing
+2. Look up token in `verification_tokens` — 400 if not found
+3. If `used = true` — 400
+4. If `expires_at < NOW()` — 410
+5. Mark token as used: `UPDATE verification_tokens SET used = true WHERE token = $1`
+6. Write wallet mapping: `UPDATE students SET wallet_address = $1, verified_at = NOW() WHERE davidson_email = $2`
+7. Redirect to `APP_URL/`
 
 ---
 
@@ -431,6 +484,8 @@ All required env vars. Add all to `.env.example` with placeholder values.
 SUPABASE_URL=
 SUPABASE_SERVICE_KEY=
 ADMIN_SECRET=
+RESEND_API_KEY=
+APP_URL=http://localhost:3000
 ```
 
 Frontend-facing vars (also needed here for SSR reads):
@@ -512,30 +567,38 @@ NEXT_PUBLIC_USDC_ADDRESS=
 
 ---
 
-### BE-04 — POST /api/verify
+### BE-04 — POST /api/verify + GET /api/verify/confirm
 
-**Description:** Implement the student email verification and wallet mapping endpoint.
+**Description:** Implement the two-step email verification flow. `POST /api/verify` sends a confirmation email; `GET /api/verify/confirm` validates the token and writes the wallet mapping.
+
+**Install:** `npm install resend`
 
 **Files to create/edit:**
-- `app/api/verify/route.ts`
+- `app/api/verify/route.ts` — POST handler (send email)
+- `app/api/verify/confirm/route.ts` — GET handler (validate token + map wallet)
 - `scripts/seed-students.ts` (seed ~20 fake `@davidson.edu` emails)
 
 **Acceptance Criteria:**
-- All validation and error cases from spec implemented
-- `wallet_address` lowercased before DB operations
-- Idempotent: re-verifying the same wallet+email returns 200
+- `POST /api/verify` sends a real email via Resend containing the confirm link
+- `GET /api/verify/confirm?token=` validates token, writes wallet mapping, redirects to `/`
+- Expired tokens (> 15 min) return 410
+- Used tokens return 400
+- `wallet_address` lowercased before all DB operations
 - Seed script populates `students` table with ~20 emails and can be re-run safely
-- `.env.example` updated if any new env vars added
+- `verification_tokens` table already exists in Supabase
 
 **Testing:**
-- POST with valid wallet + email in seed list → 200
+- POST with valid wallet + email in seed list → 200 + email sent
 - POST with email not in seed list → 404
-- POST with same wallet+email twice → 200 (idempotent)
 - POST with email already claimed by a different wallet → 409
 - POST with non-`@davidson.edu` email → 400 with `field: davidson_email`
 - POST with malformed wallet address → 400 with `field: wallet_address`
+- GET with valid unused token → 302 redirect + wallet mapped in `students`
+- GET with expired token → 410
+- GET with already-used token → 400
+- GET with missing token → 400
 
-**Dependencies:** BE-01, DB-01
+**Dependencies:** BE-01, DB-01, `verification_tokens` migration
 
 ---
 

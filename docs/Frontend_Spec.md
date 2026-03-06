@@ -107,16 +107,34 @@ frontend/
 
 ### `/onboarding` — Email Verification
 
-**Purpose:** First-time setup. Maps connected wallet to a Davidson email.
+**Purpose:** First-time setup. Maps connected wallet to a Davidson email via a confirmation email.
 
 **Flow:**
 1. Student connects wallet
 2. Middleware checks `GET /api/students?wallet=0x...` — if not found, redirect here
-3. Student enters `@davidson.edu` email
+3. Student enters `@davidson.edu` email and submits
 4. `POST /api/verify` called with `{ wallet_address, davidson_email }`
-5. On success → redirect to `/`
-6. On `404` → "Email not found in student list"
-7. On `409` → "Wallet already verified"
+   - Server checks email exists in seeded `students` table
+   - Server generates a one-time token, stores it in `verification_tokens` table with `{ token, wallet_address, davidson_email, expires_at }` (expires in 15 minutes)
+   - Server sends a verification email to the address with a link: `/onboarding/confirm?token=<token>`
+   - UI shows: "Check your Davidson email — click the link to confirm"
+5. Student clicks the link in their email → lands on `/onboarding/confirm?token=...`
+6. `GET /api/verify/confirm?token=<token>` is called server-side
+   - Validates token exists and is not expired
+   - Maps `wallet_address` to the `davidson_email` in `students` table
+   - Marks token as used
+   - Redirects to `/`
+7. Error states:
+   - `404` → "Email not found in student list"
+   - `409` → "Wallet already verified"
+   - `410` → "Verification link has expired — request a new one"
+   - `400` → "Invalid or already-used verification link"
+
+**Email sending:** Use [Resend](https://resend.com) (`npm install resend`). Add `RESEND_API_KEY` to `.env.local`. Send from `noreply@davidson.edu` (or a Resend sandbox address for the prototype).
+
+**New API endpoints required:**
+- `POST /api/verify` — validate email exists, generate token, send confirmation email
+- `GET /api/verify/confirm?token=` — validate token, write wallet→email mapping, redirect to `/`
 
 ---
 
@@ -407,13 +425,30 @@ npm install wagmi viem @tanstack/react-query swr
 
 ### FE-03 — Onboarding / Email Verification Page
 
-**What:** `/onboarding` page. If connected wallet not in student list, redirect here. Student enters `@davidson.edu` email. Calls `POST /api/verify`.
+**What:** `/onboarding` page + `/onboarding/confirm` handler. Two-step email confirmation flow.
+
+**Install:** `npm install resend` — add `RESEND_API_KEY` to `.env.local`.
+
+**Step 1 — `/onboarding` (email entry):**
+- If connected wallet not in `students` table, redirect here (checked via `GET /api/students?wallet=0x...`)
+- Student enters `@davidson.edu` email and submits
+- Calls `POST /api/verify` with `{ wallet_address, davidson_email }`
+- On success → show "Check your Davidson email and click the verification link"
+- On `404` → "Email not found in student list"
+- On `409` → "This wallet is already verified"
+- Allow resend after 60 seconds (disable button with countdown)
+
+**Step 2 — `/onboarding/confirm?token=` (link from email):**
+- Page calls `GET /api/verify/confirm?token=<token>` on load
+- On success → redirect to `/`
+- On `410` (expired) → show "Link expired" with button to go back to `/onboarding`
+- On `400` (invalid/used) → show "Invalid link"
 
 **Done when:**
 - Unverified wallets land on `/onboarding` after connecting
-- Successful verify → redirect to `/`
-- 404 shows "Email not found in student list"
-- 409 shows "Wallet already verified"
+- Email is sent with working confirmation link
+- Clicking link maps wallet → email in `students` table and redirects to `/`
+- All error states display correct messages
 
 ---
 
@@ -445,7 +480,44 @@ npm install wagmi viem @tanstack/react-query swr
 
 ### FE-06 — Offer Listings Page (Read)
 
-**What:** `/listings` with Ask and Bid tabs. Fetches from `/api/asks` and `/api/bids`. Auto-refreshes every 15s.
+**What:** `/listings` with Ask and Bid tabs. Fetches from `/api/asks` and `/api/bids` via SWR. Auto-refreshes every 15s.
+
+**API response shape** (both endpoints return the same structure):
+```typescript
+// GET /api/asks  — ordered by price_per_swipe ASC
+// GET /api/bids  — ordered by price_per_swipe DESC
+type Offer = {
+  offer_id: string           // UUID
+  onchain_offer_id: number   // uint256 from contract (used for acceptOffer/cancelOffer args)
+  type: 'ask' | 'bid'
+  seller_address: string     // lowercase 0x address of creator
+  swipe_count: number        // 1–6
+  price_per_swipe: number    // dollars, e.g. 7.00
+  status: 'pending'          // only pending offers returned
+  expires_at: string         // ISO timestamp
+  created_at: string         // ISO timestamp
+}
+```
+
+**Hook wiring** (`hooks/use-offers.ts`):
+```typescript
+import useSWR from 'swr'
+import { fetcher } from '@/lib/api'
+
+export function useAsks() {
+  return useSWR<Offer[]>('/api/asks', fetcher, { refreshInterval: 15000 })
+}
+
+export function useBids() {
+  return useSWR<Offer[]>('/api/bids', fetcher, { refreshInterval: 15000 })
+}
+```
+
+**OfferCard wiring:**
+- Pass `offer.onchain_offer_id` (not `offer.offer_id`) as the `offerId` arg to `acceptOffer()` and `cancelOffer()` — the contract uses its own uint256 IDs
+- Show **Cancel** if `offer.seller_address === connectedWallet.toLowerCase()`, otherwise **Accept**
+- Format expiry as a human-readable countdown (e.g. "Expires in 4h 12m")
+- Format price: `$${offer.price_per_swipe.toFixed(2)}` per swipe, `$${(offer.price_per_swipe * offer.swipe_count).toFixed(2)}` total
 
 **Done when:**
 - Asks tab shows active sell offers cheapest first
@@ -453,6 +525,7 @@ npm install wagmi viem @tanstack/react-query swr
 - Empty state message when no offers
 - OfferCard shows: type, swipes, price/swipe, total, expiry, creator (truncated)
 - Own offers show Cancel button, others show Accept button
+- List refreshes automatically within 15s of an on-chain event
 
 ---
 
