@@ -1,0 +1,690 @@
+# MealCoin — Backend API Specification
+
+**Stack:** Next.js Route Handlers (App Router) · TypeScript · Supabase (Postgres)
+**Pattern:** All routes live under `/app/api/`. Reads come from Supabase; all writes come exclusively from the indexer mirroring on-chain state (except `/api/verify` which maps wallet addresses to students).
+
+---
+
+## Architecture Notes
+
+The API is a read-mostly layer. The on-chain indexer is the only process that writes offer/trade/redemption data. The API:
+- Reads from Supabase to serve the frontend
+- Handles the one write flow: student email verification (`POST /api/verify`)
+- Exposes an admin endpoint for testing: `POST /api/admin/expire`
+
+**The API never writes directly to the `offers`, `trades`, or `redemptions` tables.** If the DB and chain diverge, the on-chain state is authoritative.
+
+---
+
+## Database Schema
+
+These tables are created by ticket DB-01. Reproduced here for reference.
+
+### `students`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `davidson_email` | `text` PK | Must end in `@davidson.edu` |
+| `wallet_address` | `text` | Lowercase. Null until verified. Indexed. |
+| `verified_at` | `timestamptz` | Null until verified |
+
+### `offers`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `offer_id` | `bigint` PK | On-chain offer ID from the Marketplace contract |
+| `type` | `text` | CHECK: `('ask', 'bid')` |
+| `creator_address` | `text` | Lowercase wallet address of offer creator. Indexed. |
+| `swipe_count` | `int` | 1–6 |
+| `price_per_swipe` | `bigint` | MockUSDC amount with 6 decimals (e.g. `7000000` = $7.00) |
+| `status` | `text` | CHECK: `('pending', 'accepted', 'cancelled', 'expired')` |
+| `expires_at` | `timestamptz` | Offer expiry — Saturday 23:55:00 of the current week |
+| `created_at` | `timestamptz` | Block timestamp of `OfferCreated` event |
+| `tx_hash` | `text` | Transaction hash of the creating transaction |
+
+### `trades`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `trade_id` | `uuid` PK | Generated |
+| `offer_id` | `bigint` FK → `offers.offer_id` | |
+| `buyer_address` | `text` | Lowercase. Indexed. |
+| `seller_address` | `text` | Lowercase. Indexed. |
+| `swipe_count` | `int` | |
+| `price` | `bigint` | Total price paid in MockUSDC (6 decimals) |
+| `tx_hash` | `text` | Transaction hash of `OfferAccepted` event |
+| `traded_at` | `timestamptz` | Block timestamp of the trade |
+
+### `redemptions`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `redemption_id` | `uuid` PK | Generated |
+| `wallet_address` | `text` | Student's wallet. Indexed. |
+| `tx_hash` | `text` | Transaction hash of `SwipeRedeemed` event. Unique — used for dedup. |
+| `redeemed_at` | `timestamptz` | Block timestamp of the redemption |
+
+---
+
+## Shared Conventions
+
+### Headers
+
+All responses include:
+```
+Content-Type: application/json
+Access-Control-Allow-Origin: http://localhost:3000
+```
+In production, the CORS origin updates to the Vercel deployment URL.
+
+### Error Shape
+
+All errors return a consistent JSON body:
+```json
+{ "error": "Human-readable message", "field": "field_name_if_applicable" }
+```
+`field` is omitted when the error is not field-specific.
+
+### Wallet Address Format
+
+All wallet addresses must match `/^0x[a-fA-F0-9]{40}$/` (case-insensitive). The API lowercases all addresses before DB reads/writes. Invalid format returns `400`.
+
+### Price Format
+
+`price_per_swipe` is stored and returned as `bigint` MockUSDC with 6 decimal places.
+`$1.00 = 1_000_000`. Max is `$12.00 = 12_000_000`.
+
+---
+
+## Endpoints
+
+---
+
+### GET /api/health
+
+Health check. Used by Railway, Vercel, and the team to confirm the API is alive.
+
+**Request:** None
+
+**Response `200`:**
+```json
+{ "status": "ok" }
+```
+
+---
+
+### GET /api/asks
+
+Returns all active sell offers ordered cheapest first.
+
+**Filtering:** `status = 'pending'` AND `expires_at > NOW()`
+
+**Request:** None
+
+**Response `200`:**
+```json
+{
+  "asks": [
+    {
+      "offer_id": 1,
+      "creator_address": "0xabc...123",
+      "swipe_count": 3,
+      "price_per_swipe": 7000000,
+      "expires_at": "2026-03-07T23:55:00Z",
+      "tx_hash": "0xdef..."
+    }
+  ]
+}
+```
+
+Returns `{ "asks": [] }` (not an error) if no active asks exist.
+
+**Ordering:** `price_per_swipe ASC` (cheapest first)
+
+---
+
+### GET /api/bids
+
+Returns all active buy offers ordered highest bidder first.
+
+**Filtering:** `status = 'pending'` AND `type = 'bid'` AND `expires_at > NOW()`
+
+**Request:** None
+
+**Response `200`:**
+```json
+{
+  "bids": [
+    {
+      "offer_id": 5,
+      "creator_address": "0xabc...456",
+      "swipe_count": 2,
+      "price_per_swipe": 9000000,
+      "expires_at": "2026-03-07T23:55:00Z",
+      "tx_hash": "0xghi..."
+    }
+  ]
+}
+```
+
+Returns `{ "bids": [] }` if no active bids.
+
+**Ordering:** `price_per_swipe DESC` (highest bidder first)
+
+---
+
+### POST /api/verify
+
+Maps a student's wallet address to their Davidson email. Called by the frontend after wallet connection when the wallet is not yet verified.
+
+**Request body:**
+```json
+{
+  "wallet_address": "0xabc...123",
+  "davidson_email": "jdoe@davidson.edu"
+}
+```
+
+**Validation:**
+- `wallet_address` must match the wallet address regex
+- `davidson_email` must end in `@davidson.edu`
+- Both fields required
+
+**Response `200` — success:**
+```json
+{ "success": true }
+```
+
+**Response `404` — email not in seed list:**
+```json
+{ "error": "Email not found in student list" }
+```
+
+**Response `409` — wallet already verified:**
+```json
+{ "error": "Wallet already verified" }
+```
+
+**Response `409` — email already claimed by another wallet:**
+```json
+{ "error": "Email already linked to a different wallet" }
+```
+
+**Response `400` — validation failure:**
+```json
+{ "error": "Invalid wallet address", "field": "wallet_address" }
+```
+```json
+{ "error": "Email must be a @davidson.edu address", "field": "davidson_email" }
+```
+
+**Logic:**
+1. Validate both fields
+2. Lowercase `wallet_address`
+3. Look up `davidson_email` in `students` — 404 if not found
+4. If the record already has a `wallet_address` equal to the incoming address, return 200 (idempotent)
+5. If the record already has a different `wallet_address`, return 409
+6. Check if any other student record already has this `wallet_address` — 409 if so
+7. Update: `SET wallet_address = $1, verified_at = NOW() WHERE davidson_email = $2`
+8. Return 200
+
+---
+
+### GET /api/trades
+
+Returns completed trades, optionally filtered by wallet address.
+
+**Query params:**
+- `?wallet=0xabc...123` (optional) — returns only trades where this address is buyer or seller
+
+**Response `200`:**
+```json
+{
+  "trades": [
+    {
+      "trade_id": "uuid",
+      "offer_id": 1,
+      "buyer_address": "0xabc...",
+      "seller_address": "0xdef...",
+      "swipe_count": 2,
+      "price": 14000000,
+      "tx_hash": "0xghi...",
+      "traded_at": "2026-03-05T14:23:00Z"
+    }
+  ]
+}
+```
+
+Returns `{ "trades": [] }` if none.
+
+**Ordering:** `traded_at DESC`
+
+**Errors:**
+- `400` if `wallet` param is present but malformed
+
+---
+
+### GET /api/redemptions
+
+Returns completed redemptions, optionally filtered by wallet address.
+
+**Query params:**
+- `?wallet=0xabc...123` (optional)
+
+**Response `200`:**
+```json
+{
+  "redemptions": [
+    {
+      "redemption_id": "uuid",
+      "wallet_address": "0xabc...",
+      "tx_hash": "0xdef...",
+      "redeemed_at": "2026-03-05T12:00:00Z"
+    }
+  ]
+}
+```
+
+Returns `{ "redemptions": [] }` if none.
+
+**Ordering:** `redeemed_at DESC`
+
+**Errors:**
+- `400` if `wallet` param is present but malformed
+
+---
+
+### GET /api/wallet/:address/history
+
+Returns a combined chronological history of a single wallet's trades and redemptions.
+
+**Path param:** `:address` — wallet address (validated)
+
+**Response `200`:**
+```json
+{
+  "history": [
+    {
+      "type": "trade_bought",
+      "swipe_count": 2,
+      "price": 14000000,
+      "tx_hash": "0xabc...",
+      "timestamp": "2026-03-05T14:23:00Z"
+    },
+    {
+      "type": "trade_sold",
+      "swipe_count": 1,
+      "price": 7000000,
+      "tx_hash": "0xdef...",
+      "timestamp": "2026-03-05T11:00:00Z"
+    },
+    {
+      "type": "redemption",
+      "swipe_count": 1,
+      "price": null,
+      "tx_hash": "0xghi...",
+      "timestamp": "2026-03-04T08:30:00Z"
+    }
+  ]
+}
+```
+
+**`type` values:**
+- `trade_bought` — wallet is `buyer_address` in `trades`
+- `trade_sold` — wallet is `seller_address` in `trades`
+- `redemption` — wallet is `wallet_address` in `redemptions`
+
+**Ordering:** `timestamp DESC` across both tables (union query)
+
+**Address matching:** case-insensitive (lowercase before query)
+
+**Errors:**
+- `400` if address is malformed
+- `200` with `{ "history": [] }` if address is valid but has no history
+
+---
+
+### POST /api/admin/expire
+
+Manually marks all pending, expired offers as `expired` in the database. Testing and recovery tool only — protected by a secret token. The Saturday cron job calls this same logic automatically.
+
+**Headers:**
+```
+Authorization: Bearer <ADMIN_SECRET>
+```
+
+`ADMIN_SECRET` is set in `.env` / Vercel dashboard. Never hardcoded.
+
+**Request body:** None
+
+**Response `200`:**
+```json
+{ "expired": 3 }
+```
+`expired` is the count of offers updated.
+
+**Response `401`:**
+```json
+{ "error": "Unauthorized" }
+```
+
+**Logic:**
+1. Validate `Authorization` header
+2. `UPDATE offers SET status = 'expired' WHERE status = 'pending' AND expires_at < NOW()`
+3. Return count of updated rows
+
+**Note:** This only updates the DB. It does not call `claimExpiredOffer()` on-chain — the indexer or the backend cron job handles the chain side.
+
+---
+
+## Shared Utilities
+
+### `/lib/supabase.ts`
+
+Single Supabase client initialized once with `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`. Imported by all route handlers.
+
+```typescript
+// Shape only — implementation detail
+export const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_KEY!
+)
+```
+
+### `/lib/validate.ts`
+
+Shared validation helpers used by all routes.
+
+```typescript
+// Functions to implement:
+validateWalletAddress(address: string): boolean
+validateDavidsonEmail(email: string): boolean
+validateSwipeCount(count: number): boolean
+validatePrice(price: number): boolean
+
+// Error builder:
+validationError(message: string, field?: string): Response  // returns 400
+```
+
+### Scheduled Cron (Saturday 11:50pm)
+
+Configured in `vercel.json`:
+```json
+{
+  "crons": [
+    {
+      "path": "/api/admin/expire",
+      "schedule": "50 23 * * 6"
+    }
+  ]
+}
+```
+Requires the `Authorization` header — configure in Vercel as a protected cron via the `CRON_SECRET` pattern.
+
+---
+
+## Environment Variables
+
+All required env vars. Add all to `.env.example` with placeholder values.
+
+```
+SUPABASE_URL=
+SUPABASE_SERVICE_KEY=
+ADMIN_SECRET=
+```
+
+Frontend-facing vars (also needed here for SSR reads):
+```
+NEXT_PUBLIC_TOKEN_ADDRESS=
+NEXT_PUBLIC_MARKET_ADDRESS=
+NEXT_PUBLIC_USDC_ADDRESS=
+```
+
+---
+
+## Implementation Tickets
+
+---
+
+### BE-01 — Next.js API Route Setup & Shared Infrastructure
+
+**Description:** Bootstrap the API layer. Create the shared Supabase client and validation utilities. Implement `GET /api/health`. Add CORS middleware.
+
+**Files to create:**
+- `app/api/health/route.ts`
+- `lib/supabase.ts`
+- `lib/validate.ts`
+
+**Acceptance Criteria:**
+- `GET /api/health` returns `{ "status": "ok" }` with 200
+- `lib/supabase.ts` exports a single initialized client
+- `lib/validate.ts` exports `validateWalletAddress`, `validateDavidsonEmail`, and `validationError`
+- CORS header `Access-Control-Allow-Origin: http://localhost:3000` present on all responses
+- Supabase connection tested — health route confirms DB reachable
+
+**Dependencies:** DB-01 (Supabase credentials)
+
+**Testing:**
+- `curl localhost:3000/api/health` returns 200
+
+---
+
+### BE-02 — GET /api/asks
+
+**Description:** Implement the active sell offers endpoint.
+
+**Files to create/edit:**
+- `app/api/asks/route.ts`
+
+**Acceptance Criteria:**
+- Returns only `status = 'pending'` AND `expires_at > NOW()` AND `type = 'ask'` rows
+- Ordered `price_per_swipe ASC`
+- Returns `{ "asks": [] }` when no offers exist — never a 404 or 500
+- Response shape matches spec exactly
+
+**Testing:**
+- Seed 3 ask rows (2 pending, 1 expired via `expires_at` in the past) → assert only 2 returned
+- Seed 0 rows → assert `{ "asks": [] }`
+- Verify ordering: $6 offer appears before $9 offer
+
+**Dependencies:** BE-01
+
+---
+
+### BE-03 — GET /api/bids
+
+**Description:** Implement the active buy offers endpoint.
+
+**Files to create/edit:**
+- `app/api/bids/route.ts`
+
+**Acceptance Criteria:**
+- Returns only `status = 'pending'` AND `expires_at > NOW()` AND `type = 'bid'` rows
+- Ordered `price_per_swipe DESC`
+- Returns `{ "bids": [] }` when empty
+
+**Testing:**
+- Seed 2 bids at different prices → assert returned in descending order
+- Seed a mix of ask and bid rows → assert only bids returned
+- Seed an expired bid → assert not returned
+
+**Dependencies:** BE-01
+
+---
+
+### BE-04 — POST /api/verify
+
+**Description:** Implement the student email verification and wallet mapping endpoint.
+
+**Files to create/edit:**
+- `app/api/verify/route.ts`
+- `scripts/seed-students.ts` (seed ~20 fake `@davidson.edu` emails)
+
+**Acceptance Criteria:**
+- All validation and error cases from spec implemented
+- `wallet_address` lowercased before DB operations
+- Idempotent: re-verifying the same wallet+email returns 200
+- Seed script populates `students` table with ~20 emails and can be re-run safely
+- `.env.example` updated if any new env vars added
+
+**Testing:**
+- POST with valid wallet + email in seed list → 200
+- POST with email not in seed list → 404
+- POST with same wallet+email twice → 200 (idempotent)
+- POST with email already claimed by a different wallet → 409
+- POST with non-`@davidson.edu` email → 400 with `field: davidson_email`
+- POST with malformed wallet address → 400 with `field: wallet_address`
+
+**Dependencies:** BE-01, DB-01
+
+---
+
+### BE-05 — GET /api/trades and GET /api/redemptions
+
+**Description:** Implement trade and redemption history endpoints with optional wallet filtering.
+
+**Files to create/edit:**
+- `app/api/trades/route.ts`
+- `app/api/redemptions/route.ts`
+
+**Acceptance Criteria:**
+- Both endpoints order by timestamp descending
+- Both support optional `?wallet=` query param (case-insensitive match)
+- Malformed `?wallet=` returns 400
+- Missing or empty results return `{ "trades": [] }` / `{ "redemptions": [] }` — not errors
+
+**Testing:**
+- Seed 2 trades → assert both returned without `?wallet`
+- Seed trades for 2 wallets → filter by one wallet → assert only its trades returned
+- Pass malformed wallet address → assert 400
+- Pass valid wallet with no history → assert empty array
+
+**Dependencies:** BE-01
+
+---
+
+### BE-06 — POST /api/admin/expire and Vercel Cron
+
+**Description:** Implement the admin expire endpoint and configure the Vercel cron job to run it every Saturday at 11:50pm.
+
+**Files to create/edit:**
+- `app/api/admin/expire/route.ts`
+- `vercel.json`
+
+**Acceptance Criteria:**
+- Request without valid `Authorization` header returns 401
+- Updates all `status = 'pending'` AND `expires_at < NOW()` rows to `status = 'expired'`
+- Returns `{ "expired": N }` with the count of updated rows
+- `vercel.json` cron configured for `50 23 * * 6` targeting this endpoint
+- `ADMIN_SECRET` in `.env.example`
+
+**Testing:**
+- Seed 3 pending offers with `expires_at` in the past → call endpoint → assert all 3 now `expired`, response `{ "expired": 3 }`
+- Seed 2 pending non-expired + 1 expired → assert only the 1 past-expiry offer updated
+- Call without auth header → 401
+- Call with wrong secret → 401
+
+**Dependencies:** BE-01
+
+---
+
+### BE-07 — GET /api/wallet/:address/history
+
+**Description:** Implement the combined trade + redemption history endpoint.
+
+**Files to create/edit:**
+- `app/api/wallet/[address]/history/route.ts`
+
+**Acceptance Criteria:**
+- Unifies trades (as `trade_bought` or `trade_sold`) and redemptions into one sorted list
+- All fields from spec present on each item
+- `price: null` for redemptions
+- Sorted by `timestamp DESC` across both tables
+- Address lookup is case-insensitive
+- Malformed address returns 400
+
+**Testing:**
+- Wallet has 1 buy trade, 1 sell trade, 1 redemption → assert all 3 returned in correct order with correct `type`
+- Wallet with no history → `{ "history": [] }`
+- Malformed address → 400
+- `0xABC...` and `0xabc...` (same wallet, different case) → same results
+
+**Dependencies:** BE-01, BE-05
+
+---
+
+### BE-08 — Input Validation Audit & Hardening
+
+**Description:** Audit all route handlers for missing validation. Ensure every route uses `lib/validate.ts` helpers — no duplicate validation logic.
+
+**Files to edit:**
+- All route files
+- `lib/validate.ts` (add any missing helpers)
+
+**Acceptance Criteria:**
+- Every route that accepts input validates it and returns a structured `{ error, field }` on failure
+- No route has inline validation that duplicates `lib/validate.ts`
+- `swipe_count` out of range (0 or > 6) → 400 with `field: swipe_count` (for any future write routes)
+- `price_per_swipe` > 12_000_000 → 400 with `field: price_per_swipe`
+- All `400` responses use the shape `{ "error": string, "field"?: string }`
+
+**Testing:**
+- Run through all validation error cases on each endpoint
+- Confirm consistent error shape across all routes
+
+**Dependencies:** BE-01 through BE-07
+
+---
+
+### BE-09 — Deploy to Vercel
+
+**Description:** Deploy the Next.js app (frontend + API routes) to Vercel and confirm all endpoints respond correctly.
+
+**Acceptance Criteria:**
+- App live on a Vercel URL
+- All env vars (`SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `ADMIN_SECRET`) set in Vercel dashboard — nothing hardcoded
+- `GET /api/health` returns 200 on live URL
+- `GET /api/asks`, `GET /api/bids`, `GET /api/trades`, `GET /api/redemptions` return 200 on live URL
+- Vercel project connected to GitHub repo (`main` branch) for automatic deploys
+- Cron job visible in Vercel dashboard
+
+**Testing:**
+- Hit each endpoint on the live Vercel URL
+- Verify cron is scheduled in the Vercel dashboard
+
+**Dependencies:** All BE tickets, FE tickets
+
+---
+
+## Testing Strategy
+
+Each ticket has its own unit tests. The full suite should be runnable with one command. Suggested approach:
+
+- **Unit tests:** Use Jest + `supertest` to test each route handler in isolation with a seeded test Supabase schema (or mocked Supabase client).
+- **Integration tests:** Seed real data into Supabase Dev project, hit the API, assert DB state.
+- **Test data:** All test wallet addresses use valid format (e.g. `0x0000000000000000000000000000000000000001`).
+
+### Recommended test file locations
+
+```
+app/api/health/__tests__/route.test.ts
+app/api/asks/__tests__/route.test.ts
+app/api/bids/__tests__/route.test.ts
+app/api/verify/__tests__/route.test.ts
+app/api/trades/__tests__/route.test.ts
+app/api/redemptions/__tests__/route.test.ts
+app/api/wallet/[address]/history/__tests__/route.test.ts
+app/api/admin/expire/__tests__/route.test.ts
+lib/__tests__/validate.test.ts
+```
+
+---
+
+## Key Constraints & Gotchas
+
+1. **No direct writes from API** (except `/api/verify`). Offer/trade/redemption data comes exclusively from the indexer.
+2. **`expires_at` filtering is done in SQL**, not application code. `expires_at < NOW()` is evaluated by Postgres.
+3. **All wallet addresses are lowercased** before any DB operation — both reads and writes.
+4. **`price_per_swipe` is a bigint** (MockUSDC 6 decimals). Return it as a number in JSON. Frontend converts: `price / 1_000_000` for display.
+5. **Upsert, not insert** — the indexer uses upsert on all offer/trade/redemption writes. The API never needs to worry about duplicates.
+6. **On-chain is authoritative.** If the DB is stale for a given offer, the frontend should fall back to calling `marketplace.getOffer(id)` directly via viem.
