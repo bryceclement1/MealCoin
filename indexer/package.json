@@ -1,0 +1,19 @@
+{
+  "name": "mealcoin-indexer",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "ts-node --transpile-only src/index.ts",
+    "test:rpc": "ts-node --transpile-only scripts/test-rpc.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.x",
+    "dotenv": "^16.x",
+    "viem": "^2.x"
+  },
+  "devDependencies": {
+    "@types/node": "^20.x",
+    "ts-node": "^10.x",
+    "typescript": "^5.x"
+  }
+}
