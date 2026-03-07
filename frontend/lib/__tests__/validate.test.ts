@@ -102,24 +102,24 @@ describe('validateSwipeCount', () => {
 // ─── validatePrice ────────────────────────────────────────────────────────────
 
 describe('validatePrice', () => {
-  it('accepts the minimum valid price of 1', () => {
-    expect(validatePrice(1)).toBe(true)
+  it('accepts the minimum valid price of $0.01', () => {
+    expect(validatePrice(0.01)).toBe(true)
   })
 
-  it('accepts a mid-range price of $7.00 (7_000_000)', () => {
-    expect(validatePrice(7_000_000)).toBe(true)
+  it('accepts a mid-range price of $7.00', () => {
+    expect(validatePrice(7.00)).toBe(true)
   })
 
-  it('accepts the maximum price of $12.00 (12_000_000)', () => {
-    expect(validatePrice(12_000_000)).toBe(true)
+  it('accepts the maximum price of $12.00', () => {
+    expect(validatePrice(12)).toBe(true)
   })
 
   it('rejects 0', () => {
     expect(validatePrice(0)).toBe(false)
   })
 
-  it('rejects a price one unit above the maximum (12_000_001)', () => {
-    expect(validatePrice(12_000_001)).toBe(false)
+  it('rejects a price above the maximum ($12.01)', () => {
+    expect(validatePrice(12.01)).toBe(false)
   })
 
   it('rejects a negative price', () => {
