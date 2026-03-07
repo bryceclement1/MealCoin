@@ -1,18 +1,16 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { useAccount } from 'wagmi'
-import { mutate } from 'swr'
 import { Button } from '@/components/ui/button'
 import { WalletButton } from '@/components/wallet-button'
 
 export default function OnboardingPage() {
   const { address, isConnected } = useAccount()
-  const router = useRouter()
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [sent, setSent] = useState(false)
 
   if (!isConnected) {
     return (
@@ -47,11 +45,29 @@ export default function OnboardingPage() {
         return
       }
 
-      await mutate(`/api/students?wallet=${address}`)
-      router.push('/')
+      setSent(true)
     } finally {
       setLoading(false)
     }
+  }
+
+  if (sent) {
+    return (
+      <main className="flex min-h-[80vh] flex-col items-center justify-center">
+        <div className="w-full max-w-sm space-y-4 text-center">
+          <h1 className="text-2xl font-bold">Check your email</h1>
+          <p className="text-sm text-muted-foreground">
+            We sent a verification link to <strong>{email}</strong>. Click it to activate your account.
+          </p>
+          <button
+            onClick={() => setSent(false)}
+            className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+          >
+            Didn&apos;t get it? Resend
+          </button>
+        </div>
+      </main>
+    )
   }
 
   return (
