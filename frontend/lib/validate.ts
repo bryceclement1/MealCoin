@@ -15,7 +15,7 @@ export function validateSwipeCount(count: number): boolean {
 }
 
 export function validatePrice(price: number): boolean {
-  return price > 0 && price <= 12_000_000
+  return price > 0 && price <= 12
 }
 
 export function validationError(message: string, field?: string): NextResponse {
