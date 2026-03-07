@@ -1,0 +1,15 @@
+{
+  "network": "Base Sepolia",
+  "chainId": 84532,
+  "deployedAt": "2025-05-03",
+  "contracts": {
+    "MockUSDC": "0x410d86d853a5d0dc4043e83d4e4e1616581999c6",
+    "MealSwipeToken": "0x22e213d509ba718430039411349a434de880a13c",
+    "Marketplace": "0x57dddf695b5cf4ef57f1c9b1aabd9b6f45430343"
+  },
+  "notes": [
+    "Deployed via forge script contracts/script/Deploy.s.sol --broadcast --verify",
+    "approveDining() must be called from the owner wallet for each physical dining terminal",
+    "MockUSDC.mint() is open to anyone — testnet only"
+  ]
+}
