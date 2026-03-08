@@ -1,4 +1,5 @@
 import { db } from '../db'
+import { config } from '../config'
 import { withRetry } from '../retry'
 
 export async function handleOfferExpired(log: any): Promise<void> {
@@ -6,7 +7,7 @@ export async function handleOfferExpired(log: any): Promise<void> {
 
   console.log(`[OfferExpired] offerId=${offerId}`)
 
-  const offer = await db.getOfferByOnchainId(Number(offerId))
+  const offer = await db.getOfferByOnchainId(Number(offerId), config.marketAddress.toLowerCase())
   if (!offer) return
 
   await withRetry(() =>

@@ -7,6 +7,7 @@ export const db = {
 
   async upsertOffer(row: {
     onchain_offer_id: number
+    contract_address: string
     type: 'ask' | 'bid'
     seller_address: string
     swipe_count: number
@@ -17,15 +18,16 @@ export const db = {
   }) {
     const { error } = await supabase
       .from('offers')
-      .upsert(row, { onConflict: 'onchain_offer_id' })
+      .upsert(row, { onConflict: 'onchain_offer_id,contract_address' })
     if (error) throw new Error(`upsertOffer: ${error.message}`)
   },
 
-  async getOfferByOnchainId(onchainOfferId: number) {
+  async getOfferByOnchainId(onchainOfferId: number, contractAddress: string) {
     const { data, error } = await supabase
       .from('offers')
       .select('offer_id, seller_address, swipe_count, price_per_swipe')
       .eq('onchain_offer_id', onchainOfferId)
+      .eq('contract_address', contractAddress)
       .maybeSingle()
     if (error) throw new Error(`getOfferByOnchainId: ${error.message}`)
     return data

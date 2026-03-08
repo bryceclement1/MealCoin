@@ -1,4 +1,5 @@
 import { db } from '../db'
+import { config } from '../config'
 import { withRetry } from '../retry'
 
 export async function handleOfferCreated(log: any): Promise<void> {
@@ -12,6 +13,7 @@ export async function handleOfferCreated(log: any): Promise<void> {
   await withRetry(() =>
     db.upsertOffer({
       onchain_offer_id: Number(offerId),
+      contract_address: config.marketAddress.toLowerCase(),
       type,
       seller_address: creator.toLowerCase(),
       swipe_count: Number(swipeCount),

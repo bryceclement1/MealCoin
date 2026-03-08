@@ -1,4 +1,5 @@
 import { db } from '../db'
+import { config } from '../config'
 import { withRetry } from '../retry'
 
 export async function handleOfferAccepted(log: any): Promise<void> {
@@ -7,7 +8,7 @@ export async function handleOfferAccepted(log: any): Promise<void> {
   console.log(`[OfferAccepted] offerId=${offerId} acceptor=${acceptor}`)
 
   // 1. Look up the offer to get creator + price details
-  const offer = await db.getOfferByOnchainId(Number(offerId))
+  const offer = await db.getOfferByOnchainId(Number(offerId), config.marketAddress.toLowerCase())
   if (!offer) {
     console.warn(`[WARN] OfferAccepted: no DB row for onchain_offer_id=${offerId}`)
     return

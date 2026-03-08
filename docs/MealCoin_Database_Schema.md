@@ -34,6 +34,8 @@ Stores all buy and sell offers posted to the marketplace. Written exclusively by
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | `offer_id` | `UUID` | PK, default `gen_random_uuid()` | Matches the `offerId` emitted by the Marketplace contract |
+| `onchain_offer_id` | `BIGINT` | NOT NULL | On-chain offer ID from the Marketplace contract |
+| `contract_address` | `TEXT` | NOT NULL | Address of the Marketplace contract that emitted this offer. Part of compound unique key — prevents cross-deployment ID collisions. |
 | `type` | `TEXT` | NOT NULL, CHECK `('ask', 'bid')` | `ask` = sell offer, `bid` = buy offer |
 | `seller_address` | `TEXT` | NOT NULL | Wallet address of the student who created the offer |
 | `swipe_count` | `INTEGER` | NOT NULL, CHECK `(1–6)` | Number of swipes in the offer |
@@ -43,10 +45,14 @@ Stores all buy and sell offers posted to the marketplace. Written exclusively by
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, default `NOW()` | When the offer was indexed |
 | `expires_at` | `TIMESTAMPTZ` | NOT NULL | Saturday 11:59pm of the current week — set from the contract event |
 
+**Constraints**
+- `UNIQUE (onchain_offer_id, contract_address)` — prevents cross-deployment ID collisions when the Marketplace is redeployed
+
 **Indexes**
 - `idx_offers_status` on `status` — fast filtering of pending offers
 - `idx_offers_seller` on `seller_address` — lookup of a student's own offers
 - `idx_offers_expires_at` on `expires_at` — fast filtering of expired offers
+- `idx_offers_onchain_id` on `onchain_offer_id` — fast lookup by on-chain ID
 
 **Status transitions**
 
@@ -59,7 +65,8 @@ pending → expired    (SwipesBurned epoch event OR scheduled cron job)
 **Notes**
 - All writes come from the indexer — the API only reads this table
 - The `seller_address` column covers both ask and bid types (it represents the offer creator in both cases)
-- Rows are upserted by the indexer on `offer_id` to ensure re-indexing is idempotent
+- Rows are upserted by the indexer on `(onchain_offer_id, contract_address)` to ensure re-indexing is idempotent
+- `contract_address` is stored lowercase and scopes offers to a specific Marketplace deployment, preventing `created_at` from being preserved across redeployments when offer IDs restart from 1
 
 ---
 
@@ -125,20 +132,24 @@ CREATE INDEX idx_students_wallet ON students (wallet_address);
 
 -- 2. Offers
 CREATE TABLE offers (
-  offer_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  type            TEXT NOT NULL CHECK (type IN ('ask', 'bid')),
-  seller_address  TEXT NOT NULL,
-  swipe_count     INTEGER NOT NULL CHECK (swipe_count BETWEEN 1 AND 6),
-  price_per_swipe NUMERIC(10, 2) NOT NULL CHECK (price_per_swipe > 0 AND price_per_swipe <= 12),
-  status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'cancelled', 'expired')),
-  tx_hash         TEXT,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  expires_at      TIMESTAMPTZ NOT NULL
+  offer_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  onchain_offer_id  BIGINT NOT NULL,
+  contract_address  TEXT NOT NULL,
+  type              TEXT NOT NULL CHECK (type IN ('ask', 'bid')),
+  seller_address    TEXT NOT NULL,
+  swipe_count       INTEGER NOT NULL CHECK (swipe_count BETWEEN 1 AND 6),
+  price_per_swipe   NUMERIC(10, 2) NOT NULL CHECK (price_per_swipe > 0 AND price_per_swipe <= 12),
+  status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'cancelled', 'expired')),
+  tx_hash           TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at        TIMESTAMPTZ NOT NULL,
+  CONSTRAINT offers_onchain_offer_id_contract_address_key UNIQUE (onchain_offer_id, contract_address)
 );
 
 CREATE INDEX idx_offers_status     ON offers (status);
 CREATE INDEX idx_offers_seller     ON offers (seller_address);
 CREATE INDEX idx_offers_expires_at ON offers (expires_at);
+CREATE INDEX idx_offers_onchain_id ON offers (onchain_offer_id);
 
 -- 3. Trades
 CREATE TABLE trades (
@@ -179,6 +190,8 @@ students
                                                            │
 offers                                                     │
   offer_id (PK) ◄──────────────────┐                      │
+  onchain_offer_id                 │                       │
+  contract_address                 │                       │
   type                             │                       │
   seller_address ◄─────────────────┼───────────────────── ┘
   swipe_count                      │
