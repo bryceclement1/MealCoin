@@ -1,11 +1,11 @@
 {
   "network": "Base Sepolia",
   "chainId": 84532,
-  "deployedAt": "2025-05-03",
+  "deployedAt": "2026-03-07",
   "contracts": {
-    "MockUSDC": "0x410d86d853a5d0dc4043e83d4e4e1616581999c6",
+    "MockUSDC": "0x724405Ca5Bde59213Bf98a3Af94368bA6d812bAf",
     "MealSwipeToken": "0x22e213d509ba718430039411349a434de880a13c",
-    "Marketplace": "0x57dddf695b5cf4ef57f1c9b1aabd9b6f45430343"
+    "Marketplace": "0x648C4eCf3fcFc673D5F84F405D58FD5e7f215103"
   },
   "notes": [
     "Deployed via forge script contracts/script/Deploy.s.sol --broadcast --verify",

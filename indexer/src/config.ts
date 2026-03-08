@@ -7,6 +7,7 @@ export const config = {
   supabaseKey:   required('SUPABASE_SERVICE_KEY'),
   tokenAddress:  required('TOKEN_ADDRESS') as `0x${string}`,
   marketAddress: required('MARKET_ADDRESS') as `0x${string}`,
+  privateKey:    required('PRIVATE_KEY'),
   pollInterval:  Number(process.env.POLL_INTERVAL_MS ?? 5000),
   chunkSize:     Number(process.env.CHUNK_SIZE ?? 500),
 }

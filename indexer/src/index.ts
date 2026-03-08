@@ -4,6 +4,7 @@ import { pollOnce } from './poller'
 import { sleep } from './retry'
 import { createPublicClient, http } from 'viem'
 import { baseSepolia } from 'viem/chains'
+import { registerExpiryCron } from './cron/expireOffers'
 
 const client = createPublicClient({
   chain: baseSepolia,
@@ -12,6 +13,7 @@ const client = createPublicClient({
 
 async function main() {
   console.log('[INFO] MealCoin indexer starting...')
+  registerExpiryCron()
 
   // Start from the current block — ignore any previously saved state
   const startBlock = await client.getBlockNumber()

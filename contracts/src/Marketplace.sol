@@ -298,9 +298,10 @@ contract Marketplace {
     ///      If called on Saturday, returns tonight's 23:59:59 (daysUntilSaturday = 0).
     /// @return The Unix timestamp of the next Saturday at 23:59:59
     function _getNextSaturdayMidnight() internal view returns (uint256) {
-        uint256 dayOfWeek = (block.timestamp / 1 days + 4) % 7;
+        uint256 estTimestamp = block.timestamp - 18000; // EST = UTC - 5 h
+        uint256 dayOfWeek = (estTimestamp / 1 days + 4) % 7;
         uint256 daysUntilSaturday = (6 - dayOfWeek) % 7;
-        uint256 startOfSaturday = (block.timestamp / 1 days + daysUntilSaturday) * 1 days;
+        uint256 startOfSaturday = (estTimestamp / 1 days + daysUntilSaturday) * 1 days;
         return startOfSaturday + 104100; // 04:55:00 UTC Sunday = 11:55 PM EST Saturday
     }
 }
