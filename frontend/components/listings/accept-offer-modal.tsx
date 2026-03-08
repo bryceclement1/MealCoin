@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi'
 import { useMSTBalance } from '@/hooks/use-mst-balance'
-import { type OnChainOffer } from '@/hooks/use-market-offers'
+import { type Offer } from '@/lib/api'
 import {
   TOKEN_ADDRESS, TOKEN_ABI,
   MARKET_ADDRESS, MARKET_ABI,
@@ -17,8 +17,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-
-const toUSDCDisplay = (raw: bigint) => `$${(Number(raw) / 1_000_000).toFixed(2)}`
 
 const REVERT_MESSAGES: Record<string, string> = {
   CannotAcceptOwnOffer: 'You cannot accept your own offer',
@@ -45,7 +43,7 @@ function isBlackout(): boolean {
 type Step = 'idle' | 'approving' | 'accepting' | 'done'
 
 interface Props {
-  offer: OnChainOffer
+  offer: Offer
   onAccepted: () => void
 }
 
@@ -70,8 +68,9 @@ export function AcceptOfferModal({ offer, onAccepted }: Props) {
   const approveReceipt = useWaitForTransactionReceipt({ hash: approveTxHash })
   const acceptReceipt = useWaitForTransactionReceipt({ hash: acceptTxHash })
 
-  const isAsk = offer.offerType === 0
-  const totalUsdc = offer.swipeCount * offer.pricePerSwipe
+  const isAsk = offer.type === 'ask'
+  // Convert dollar price back to MockUSDC units (6 decimals) for contract calls
+  const totalUsdc = BigInt(Math.round(offer.swipe_count * offer.price_per_swipe * 1_000_000))
 
   // Approval confirmed → submit acceptOffer
   useEffect(() => {
@@ -82,7 +81,7 @@ export function AcceptOfferModal({ offer, onAccepted }: Props) {
           address: MARKET_ADDRESS,
           abi: MARKET_ABI,
           functionName: 'acceptOffer',
-          args: [offer.offerId],
+          args: [BigInt(offer.onchain_offer_id)],
         })
       } catch (e) {
         setError(parseRevertError(e))
@@ -100,7 +99,6 @@ export function AcceptOfferModal({ offer, onAccepted }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [acceptReceipt.isSuccess])
 
-  // Handle failed receipts
   useEffect(() => {
     if (approveReceipt.isError && step === 'approving') {
       setError(parseRevertError(approveReceipt.error))
@@ -132,7 +130,7 @@ export function AcceptOfferModal({ offer, onAccepted }: Props) {
   }
 
   function validate(): boolean {
-    if (address?.toLowerCase() === offer.creator.toLowerCase()) {
+    if (address?.toLowerCase() === offer.seller_address.toLowerCase()) {
       setError('You cannot accept your own offer')
       return false
     }
@@ -148,7 +146,7 @@ export function AcceptOfferModal({ offer, onAccepted }: Props) {
       }
     } else {
       const mst = (mstBalance as bigint | undefined) ?? BigInt(0)
-      if (offer.swipeCount > mst) {
+      if (BigInt(offer.swipe_count) > mst) {
         setError("You don't have enough swipes")
         return false
       }
@@ -174,7 +172,7 @@ export function AcceptOfferModal({ offer, onAccepted }: Props) {
           address: TOKEN_ADDRESS,
           abi: TOKEN_ABI,
           functionName: 'approve',
-          args: [MARKET_ADDRESS, offer.swipeCount],
+          args: [MARKET_ADDRESS, BigInt(offer.swipe_count)],
         })
       }
     } catch (e) {
@@ -215,20 +213,19 @@ export function AcceptOfferModal({ offer, onAccepted }: Props) {
           </div>
         ) : (
           <div className="space-y-4">
-            {/* Offer summary */}
             <div className="rounded-md border p-4 space-y-1 text-sm">
               {isAsk ? (
                 <>
-                  <p>You pay <span className="font-semibold">{toUSDCDisplay(totalUsdc)} USDC</span></p>
-                  <p>You receive <span className="font-semibold">{Number(offer.swipeCount)} swipe{Number(offer.swipeCount) !== 1 ? 's' : ''}</span></p>
+                  <p>You pay <span className="font-semibold">${(offer.swipe_count * offer.price_per_swipe).toFixed(2)} USDC</span></p>
+                  <p>You receive <span className="font-semibold">{offer.swipe_count} swipe{offer.swipe_count !== 1 ? 's' : ''}</span></p>
                 </>
               ) : (
                 <>
-                  <p>You send <span className="font-semibold">{Number(offer.swipeCount)} swipe{Number(offer.swipeCount) !== 1 ? 's' : ''}</span></p>
-                  <p>You receive <span className="font-semibold">{toUSDCDisplay(totalUsdc)} USDC</span></p>
+                  <p>You send <span className="font-semibold">{offer.swipe_count} swipe{offer.swipe_count !== 1 ? 's' : ''}</span></p>
+                  <p>You receive <span className="font-semibold">${(offer.swipe_count * offer.price_per_swipe).toFixed(2)} USDC</span></p>
                 </>
               )}
-              <p className="text-muted-foreground">{toUSDCDisplay(offer.pricePerSwipe)} per swipe</p>
+              <p className="text-muted-foreground">${offer.price_per_swipe.toFixed(2)} per swipe</p>
             </div>
 
             {blackout && !isPending && (

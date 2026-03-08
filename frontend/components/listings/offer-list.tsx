@@ -1,13 +1,13 @@
 'use client'
 
 import { useAccount } from 'wagmi'
-import { useMarketOffers, type OnChainOffer } from '@/hooks/use-market-offers'
+import { useAsks, useBids } from '@/hooks/use-offers'
+import { type Offer } from '@/lib/api'
 import { AcceptOfferModal } from '@/components/listings/accept-offer-modal'
 import { CancelOfferModal } from '@/components/listings/cancel-offer-modal'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 
-const toUSDCDisplay = (raw: bigint) => `$${(Number(raw) / 1_000_000).toFixed(2)}`
 const truncate = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
 
 interface Props {
@@ -16,8 +16,16 @@ interface Props {
 
 export function OfferList({ type }: Props) {
   const { address } = useAccount()
-  const { asks, bids, isLoading, refetch } = useMarketOffers()
-  const offers = type === 'ask' ? asks : bids
+  const asksResult = useAsks()
+  const bidsResult = useBids()
+
+  const { data, isLoading, mutate } =
+    type === 'ask'
+      ? { ...asksResult, data: asksResult.data }
+      : { ...bidsResult, data: bidsResult.data }
+
+  const rawOffers = type === 'ask' ? data?.asks : data?.bids
+  const offers: Offer[] = (rawOffers ?? []).map((o) => ({ ...o, type }))
 
   if (isLoading) {
     return (
@@ -41,10 +49,10 @@ export function OfferList({ type }: Props) {
     <div className="space-y-3">
       {offers.map((offer) => (
         <OfferCard
-          key={offer.offerId.toString()}
+          key={offer.offer_id}
           offer={offer}
-          isOwn={address?.toLowerCase() === offer.creator.toLowerCase()}
-          onAccepted={refetch}
+          isOwn={address?.toLowerCase() === offer.seller_address.toLowerCase()}
+          onDone={() => mutate()}
         />
       ))}
     </div>
@@ -54,33 +62,32 @@ export function OfferList({ type }: Props) {
 function OfferCard({
   offer,
   isOwn,
-  onAccepted,
+  onDone,
 }: {
-  offer: OnChainOffer
+  offer: Offer
   isOwn: boolean
-  onAccepted: () => void
+  onDone: () => void
 }) {
-  const totalUsdc = offer.swipeCount * offer.pricePerSwipe
-  const expiry = new Date(Number(offer.expiresAt) * 1000).toLocaleDateString()
-  const count = Number(offer.swipeCount)
+  const total = (offer.swipe_count * offer.price_per_swipe).toFixed(2)
+  const expiry = new Date(offer.expires_at).toLocaleDateString()
 
   return (
     <Card>
       <CardContent className="flex items-center justify-between py-4">
         <div className="space-y-1 text-sm">
           <p className="font-semibold">
-            {count} swipe{count !== 1 ? 's' : ''} &mdash; {toUSDCDisplay(offer.pricePerSwipe)}/swipe
+            {offer.swipe_count} swipe{offer.swipe_count !== 1 ? 's' : ''} &mdash; ${offer.price_per_swipe.toFixed(2)}/swipe
           </p>
-          <p className="text-muted-foreground">Total: {toUSDCDisplay(totalUsdc)}</p>
+          <p className="text-muted-foreground">Total: ${total}</p>
           <p className="text-muted-foreground text-xs">
-            From {truncate(offer.creator)} &bull; Expires {expiry}
+            From {truncate(offer.seller_address)} &bull; Expires {expiry}
           </p>
         </div>
         <div className="ml-4 shrink-0">
           {isOwn ? (
-            <CancelOfferModal offer={offer} onCancelled={onAccepted} />
+            <CancelOfferModal offer={offer} onCancelled={onDone} />
           ) : (
-            <AcceptOfferModal offer={offer} onAccepted={onAccepted} />
+            <AcceptOfferModal offer={offer} onAccepted={onDone} />
           )}
         </div>
       </CardContent>

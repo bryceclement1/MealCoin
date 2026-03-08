@@ -13,6 +13,11 @@ const client = createPublicClient({
 async function main() {
   console.log('[INFO] MealCoin indexer starting...')
 
+  // Start from the current block — ignore any previously saved state
+  const startBlock = await client.getBlockNumber()
+  saveLastBlock(startBlock)
+  console.log(`[INFO] Starting from block ${startBlock}`)
+
   while (true) {
     try {
       const latestBlock = await client.getBlockNumber()

@@ -301,6 +301,6 @@ contract Marketplace {
         uint256 dayOfWeek = (block.timestamp / 1 days + 4) % 7;
         uint256 daysUntilSaturday = (6 - dayOfWeek) % 7;
         uint256 startOfSaturday = (block.timestamp / 1 days + daysUntilSaturday) * 1 days;
-        return startOfSaturday + 86100; // 23:55:00 — 5-minute buffer before burnAll at 23:59:59
+        return startOfSaturday + 104100; // 04:55:00 UTC Sunday = 11:55 PM EST Saturday
     }
 }

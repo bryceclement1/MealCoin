@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
-import { type OnChainOffer } from '@/hooks/use-market-offers'
+import { type Offer } from '@/lib/api'
 import { MARKET_ADDRESS, MARKET_ABI } from '@/lib/contracts'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,8 +12,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-
-const toUSDCDisplay = (raw: bigint) => `$${(Number(raw) / 1_000_000).toFixed(2)}`
 
 const REVERT_MESSAGES: Record<string, string> = {
   NotOfferCreator: 'Only the offer creator can cancel',
@@ -32,7 +30,7 @@ function parseRevertError(error: unknown): string {
 type Step = 'idle' | 'cancelling' | 'done'
 
 interface Props {
-  offer: OnChainOffer
+  offer: Offer
   onCancelled: () => void
 }
 
@@ -44,8 +42,8 @@ export function CancelOfferModal({ offer, onCancelled }: Props) {
   const { writeContract, data: txHash, reset } = useWriteContract()
   const receipt = useWaitForTransactionReceipt({ hash: txHash })
 
-  const isAsk = offer.offerType === 0
-  const totalUsdc = offer.swipeCount * offer.pricePerSwipe
+  const isAsk = offer.type === 'ask'
+  const totalUsdcDisplay = (offer.swipe_count * offer.price_per_swipe).toFixed(2)
 
   useEffect(() => {
     if (receipt.isSuccess && step === 'cancelling') {
@@ -82,7 +80,7 @@ export function CancelOfferModal({ offer, onCancelled }: Props) {
         address: MARKET_ADDRESS,
         abi: MARKET_ABI,
         functionName: 'cancelOffer',
-        args: [offer.offerId],
+        args: [BigInt(offer.onchain_offer_id)],
       })
     } catch (e) {
       setError(parseRevertError(e))
@@ -120,14 +118,14 @@ export function CancelOfferModal({ offer, onCancelled }: Props) {
                 <p>
                   Your sell offer for{' '}
                   <span className="font-semibold">
-                    {Number(offer.swipeCount)} swipe{Number(offer.swipeCount) !== 1 ? 's' : ''}
+                    {offer.swipe_count} swipe{offer.swipe_count !== 1 ? 's' : ''}
                   </span>{' '}
                   will be cancelled and the swipes returned to your wallet.
                 </p>
               ) : (
                 <p>
                   Your buy offer will be cancelled and{' '}
-                  <span className="font-semibold">{toUSDCDisplay(totalUsdc)} USDC</span>{' '}
+                  <span className="font-semibold">${totalUsdcDisplay} USDC</span>{' '}
                   will be returned to your wallet.
                 </p>
               )}

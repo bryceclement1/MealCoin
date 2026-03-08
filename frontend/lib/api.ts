@@ -7,13 +7,14 @@ export const fetcher = (url: string) =>
   })
 
 export type Offer = {
-  offer_id: number
-  type: 'ask' | 'bid'
-  creator_address: string
+  offer_id: string           // UUID
+  onchain_offer_id: number   // used as arg to acceptOffer / cancelOffer on-chain
+  type: 'ask' | 'bid'        // injected from endpoint context in offer-list
+  seller_address: string
   swipe_count: number
-  price_per_swipe: number
+  price_per_swipe: number    // dollars, e.g. 7.00
   expires_at: string
-  status: 'pending' | 'accepted' | 'cancelled' | 'expired'
+  tx_hash: string
 }
 
 export type Trade = {
