@@ -21,6 +21,12 @@ export function Nav() {
           >
             Redeem
           </Link>
+          <Link
+            href="/history"
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            History
+          </Link>
         </div>
         <WalletButton />
       </div>

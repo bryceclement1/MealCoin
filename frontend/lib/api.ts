@@ -27,3 +27,11 @@ export type Trade = {
   tx_hash: string
   traded_at: string
 }
+
+export type HistoryItem = {
+  type: 'trade_bought' | 'trade_sold' | 'redemption'
+  swipe_count: number | null
+  price: number | null
+  tx_hash: string
+  timestamp: string
+}
