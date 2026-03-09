@@ -1,19 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, supabaseAuth } from '@/lib/supabase'
+import { validateWalletAddress, validateDavidsonEmail, validationError } from '@/lib/validate'
 
 export async function POST(req: NextRequest) {
   const { wallet_address, davidson_email } = await req.json()
 
-  if (!wallet_address || !davidson_email) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+  if (!validateWalletAddress(wallet_address)) {
+    return validationError('Invalid wallet address', 'wallet_address')
   }
 
-  if (!/^0x[a-fA-F0-9]{40}$/.test(wallet_address)) {
-    return NextResponse.json({ error: 'Invalid wallet address' }, { status: 400 })
-  }
-
-  if (!davidson_email.endsWith('@davidson.edu')) {
-    return NextResponse.json({ error: 'Must be a @davidson.edu email address' }, { status: 400 })
+  if (!validateDavidsonEmail(davidson_email)) {
+    return validationError('Must be a @davidson.edu email address', 'davidson_email')
   }
 
   const normalizedWallet = wallet_address.toLowerCase()
