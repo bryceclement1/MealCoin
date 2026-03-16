@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { validateWalletAddress, validationError } from '@/lib/validate'
 
 export async function GET(req: NextRequest) {
   const wallet = req.nextUrl.searchParams.get('wallet')
 
-  if (!wallet) {
-    return NextResponse.json({ error: 'Missing wallet parameter' }, { status: 400 })
+  if (!wallet || !validateWalletAddress(wallet)) {
+    return validationError('Invalid wallet address', 'wallet')
   }
 
   const { data, error } = await supabase

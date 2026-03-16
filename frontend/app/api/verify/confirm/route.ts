@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { redirect } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { validationError } from '@/lib/validate'
 
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get('token')
 
   if (!token) {
-    return NextResponse.json({ error: 'Missing token' }, { status: 400 })
+    return validationError('Missing token', 'token')
   }
 
   const { data: record, error: lookupError } = await supabase

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { validateDavidsonEmail, validationError } from '@/lib/validate'
 
 export async function POST(req: NextRequest) {
   const { davidson_email } = await req.json()
 
-  if (!davidson_email) {
-    return NextResponse.json({ error: 'Missing email' }, { status: 400 })
+  if (!validateDavidsonEmail(davidson_email)) {
+    return validationError('Must be a @davidson.edu email address', 'davidson_email')
   }
 
   const normalizedEmail = davidson_email.toLowerCase()
