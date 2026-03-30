@@ -45,7 +45,17 @@ export async function buildKernelClient(walletClient: WalletClient) {
     account,
     chain: base,
     bundlerTransport: http(bundlerUrl),
-    ...(pimlicoClient && { paymaster: pimlicoClient }),
+    ...(pimlicoClient && {
+      paymaster: pimlicoClient,
+      // ZeroDev's default gas price method (zd_getUserOperationGasPrice) doesn't
+      // exist on Pimlico — override to use Pimlico's own gas price endpoint.
+      userOperation: {
+        estimateFeesPerGas: async () => {
+          const { fast } = await pimlicoClient.getUserOperationGasPrice()
+          return fast
+        },
+      },
+    }),
   })
 
   return {
