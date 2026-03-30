@@ -7,7 +7,7 @@ export const config = createConfig({
   connectors: [
     // Explicit connector forces eoaOnly mode so the extension popup appears
     // instead of silently failing in smart-wallet mode via EIP-6963 discovery
-    coinbaseWallet({ appName: 'MealCoin', preference: 'eoaOnly' }),
+    coinbaseWallet({ appName: 'MealCoin', preference: { options: 'eoaOnly' } }),
   ],
   transports: {
     [base.id]: http(process.env.NEXT_PUBLIC_RPC_URL),
