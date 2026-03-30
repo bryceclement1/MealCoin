@@ -66,8 +66,12 @@ export async function sendBatch(
     data: encodeFunctionData({ abi, functionName, args }),
     value: BigInt(0),
   }))
-  const callData = await kernelClient.account.encodeCalls(encoded)
-  return kernelClient.sendUserOperation({ callData })
+  try {
+    return await kernelClient.sendUserOperation({ calls: encoded })
+  } catch (err) {
+    console.error('[sendBatch] UserOp failed:', err)
+    throw err
+  }
 }
 
 export type KernelClient = Awaited<ReturnType<typeof buildKernelClient>>['kernelClient']

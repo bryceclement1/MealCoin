@@ -30,6 +30,7 @@ const REVERT_MESSAGES: Record<string, string> = {
 }
 
 function parseRevertError(error: unknown): string {
+  console.error('[acceptOffer] tx error:', error)
   const msg = error instanceof Error ? error.message : String(error)
   for (const [key, value] of Object.entries(REVERT_MESSAGES)) {
     if (msg.includes(key)) return value
