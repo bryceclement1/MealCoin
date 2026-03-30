@@ -50,14 +50,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: markUsedError.message }, { status: 500 })
   }
 
-  // Write wallet → email mapping to students
-  const { error: updateError } = await supabase
+  // If this wallet is already linked to a different email, clear it first to
+  // avoid a UNIQUE constraint violation on wallet_address.
+  const { error: clearError } = await supabase
     .from('students')
-    .update({ wallet_address: record.wallet_address, verified_at: new Date().toISOString() })
-    .eq('davidson_email', normalizedEmail)
+    .update({ wallet_address: null, verified_at: null })
+    .eq('wallet_address', record.wallet_address)
+    .neq('davidson_email', normalizedEmail)
 
-  if (updateError) {
-    return NextResponse.json({ error: updateError.message }, { status: 500 })
+  if (clearError) {
+    return NextResponse.json({ error: clearError.message }, { status: 500 })
+  }
+
+  // Upsert on davidson_email — creates a new row for first-time users,
+  // or updates wallet_address for existing users (including email takeover).
+  const { error: upsertError } = await supabase
+    .from('students')
+    .upsert(
+      { davidson_email: normalizedEmail, wallet_address: record.wallet_address, verified_at: new Date().toISOString() },
+      { onConflict: 'davidson_email' }
+    )
+
+  if (upsertError) {
+    return NextResponse.json({ error: upsertError.message }, { status: 500 })
   }
 
   return NextResponse.json({ ok: true })

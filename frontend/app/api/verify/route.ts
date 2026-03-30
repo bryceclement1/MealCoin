@@ -16,41 +16,6 @@ export async function POST(req: NextRequest) {
   const normalizedWallet = wallet_address.toLowerCase()
   const normalizedEmail = davidson_email.toLowerCase()
 
-  // Check if email exists in students table
-  const { data: student, error: lookupError } = await supabase
-    .from('students')
-    .select('davidson_email, wallet_address')
-    .eq('davidson_email', normalizedEmail)
-    .maybeSingle()
-
-  if (lookupError) {
-    return NextResponse.json({ error: lookupError.message }, { status: 500 })
-  }
-
-  if (!student) {
-    return NextResponse.json({ error: 'Email not found in student list' }, { status: 404 })
-  }
-
-  if (student.wallet_address) {
-    if (student.wallet_address === normalizedWallet) {
-      // Idempotent resend — fall through to send another email
-    } else {
-      return NextResponse.json({ error: 'This email is already linked to another wallet' }, { status: 409 })
-    }
-  }
-
-  // Check if another student already has this wallet
-  const { data: walletConflict } = await supabase
-    .from('students')
-    .select('davidson_email')
-    .eq('wallet_address', normalizedWallet)
-    .neq('davidson_email', normalizedEmail)
-    .maybeSingle()
-
-  if (walletConflict) {
-    return NextResponse.json({ error: 'This wallet is already linked to another account' }, { status: 409 })
-  }
-
   // Generate verification token
   const token = crypto.randomUUID()
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
