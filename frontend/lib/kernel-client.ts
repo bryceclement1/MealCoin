@@ -66,8 +66,8 @@ export async function sendBatch(
     data: encodeFunctionData({ abi, functionName, args }),
     value: BigInt(0),
   }))
-  // sendTransaction without a top-level `to` field delegates to sendUserOperation({ calls })
-  return (kernelClient as any).sendTransaction({ calls: encoded })
+  const callData = await kernelClient.account.encodeCalls(encoded)
+  return kernelClient.sendUserOperation({ callData })
 }
 
 export type KernelClient = Awaited<ReturnType<typeof buildKernelClient>>['kernelClient']
