@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
+import { useReadContract } from 'wagmi'
 import { isAddress } from 'viem'
+import { useSmartAccount } from '@/contexts/SmartAccountContext'
 import { TOKEN_ADDRESS, TOKEN_ABI } from '@/lib/contracts'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,17 +33,17 @@ type Step = 'idle' | 'pending' | 'done'
 // ── main page ─────────────────────────────────────────────────────────────────
 
 export default function RedeemPage() {
-  const { address } = useAccount()
+  const { smartAddress } = useSmartAccount()
 
   const { data: isApproved, isLoading: isApprovalLoading } = useReadContract({
     address: TOKEN_ADDRESS,
     abi: TOKEN_ABI,
     functionName: 'approvedDining',
-    args: address ? [address] : undefined,
-    query: { enabled: !!address },
+    args: smartAddress ? [smartAddress] : undefined,
+    query: { enabled: !!smartAddress },
   })
 
-  if (!address) {
+  if (!smartAddress) {
     return (
       <PageShell>
         <p className="text-muted-foreground">
@@ -61,10 +62,10 @@ export default function RedeemPage() {
   }
 
   if (isApproved) {
-    return <DiningTerminal cashierAddress={address} />
+    return <DiningTerminal cashierAddress={smartAddress} />
   }
 
-  return <StudentView studentAddress={address} />
+  return <StudentView studentAddress={smartAddress} />
 }
 
 // ── shared shell ──────────────────────────────────────────────────────────────
@@ -81,13 +82,11 @@ function PageShell({ children }: { children: React.ReactNode }) {
 // ── dining terminal view ──────────────────────────────────────────────────────
 
 function DiningTerminal({ cashierAddress }: { cashierAddress: `0x${string}` }) {
+  const { kernelClient } = useSmartAccount()
   const [studentAddr, setStudentAddr] = useState('')
   const [error, setError] = useState('')
   const [step, setStep] = useState<Step>('idle')
   const [redeemedAddr, setRedeemedAddr] = useState('')
-
-  const { writeContract, data: txHash, reset } = useWriteContract()
-  const receipt = useWaitForTransactionReceipt({ hash: txHash })
 
   // Read student balance for live preview
   const { data: week } = useReadContract({
@@ -104,23 +103,8 @@ function DiningTerminal({ cashierAddress }: { cashierAddress: `0x${string}` }) {
     query: { enabled: isAddress(studentAddr) && week !== undefined },
   })
 
-  useEffect(() => {
-    if (receipt.isSuccess && step === 'pending') {
-      setStep('done')
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [receipt.isSuccess])
-
-  useEffect(() => {
-    if (receipt.isError && step === 'pending') {
-      setError(parseRevertError(receipt.error))
-      setStep('idle')
-      reset()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [receipt.isError])
-
-  function handleRedeem() {
+  async function handleRedeem() {
+    if (!kernelClient) return
     setError('')
     if (!isAddress(studentAddr)) {
       setError('Enter a valid wallet address')
@@ -133,12 +117,13 @@ function DiningTerminal({ cashierAddress }: { cashierAddress: `0x${string}` }) {
     setRedeemedAddr(studentAddr)
     setStep('pending')
     try {
-      writeContract({
+      await kernelClient.writeContract({
         address: TOKEN_ADDRESS,
         abi: TOKEN_ABI,
         functionName: 'redeemSwipe',
         args: [studentAddr as `0x${string}`],
       })
+      setStep('done')
     } catch (e) {
       setError(parseRevertError(e))
       setStep('idle')
@@ -150,7 +135,6 @@ function DiningTerminal({ cashierAddress }: { cashierAddress: `0x${string}` }) {
     setError('')
     setStep('idle')
     setRedeemedAddr('')
-    reset()
   }
 
   if (step === 'done') {
@@ -197,7 +181,7 @@ function DiningTerminal({ cashierAddress }: { cashierAddress: `0x${string}` }) {
         )}
 
         {isPending && (
-          <p className="text-sm text-muted-foreground">Confirming transaction...</p>
+          <p className="text-sm text-muted-foreground">Processing...</p>
         )}
 
         {error && <p className="text-sm text-destructive">{error}</p>}

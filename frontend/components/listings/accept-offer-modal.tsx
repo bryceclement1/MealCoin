@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { useAccount, useReadContract, useSendCalls, useCallsStatus } from 'wagmi'
+import { useReadContract } from 'wagmi'
+import { useSmartAccount } from '@/contexts/SmartAccountContext'
+import { sendBatch } from '@/lib/kernel-client'
 import { useMSTBalance } from '@/hooks/use-mst-balance'
 import { type Offer } from '@/lib/api'
 import {
@@ -17,8 +19,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-
-const PAYMASTER_URL = process.env.NEXT_PUBLIC_PAYMASTER_URL
 
 const REVERT_MESSAGES: Record<string, string> = {
   CannotAcceptOwnOffer: 'You cannot accept your own offer',
@@ -48,37 +48,28 @@ interface Props {
 }
 
 export function AcceptOfferModal({ offer, onAccepted }: Props) {
-  const { address } = useAccount()
-  const { data: mstBalance } = useMSTBalance(address)
+  const { smartAddress, kernelClient } = useSmartAccount()
+  const { data: mstBalance } = useMSTBalance(smartAddress)
   const { data: usdcBalance } = useReadContract({
     address: USDC_ADDRESS,
     abi: USDC_ABI,
     functionName: 'balanceOf',
-    args: address ? [address] : undefined,
-    query: { enabled: !!address },
+    args: smartAddress ? [smartAddress] : undefined,
+    query: { enabled: !!smartAddress },
   })
 
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isDone, setIsDone] = useState(false)
 
-  const { mutate: sendCalls, data: batchResult, isPending, reset } = useSendCalls()
-
-  const { data: callsStatus } = useCallsStatus({
-    id: batchResult?.id as string,
-    query: {
-      enabled: !!batchResult?.id,
-      refetchInterval: (data) => (data?.status === 'CONFIRMED' ? false : 1000),
-    },
-  })
-
-  const isDone = callsStatus?.status === 'CONFIRMED'
-  const isSubmitting = isPending || (!!batchResult?.id && !isDone)
   const isAsk = offer.type === 'ask'
   const totalUsdc = BigInt(Math.round(offer.swipe_count * offer.price_per_swipe * 1_000_000))
 
   function resetForm() {
     setError('')
-    reset()
+    setIsSubmitting(false)
+    setIsDone(false)
   }
 
   function handleOpenChange(val: boolean) {
@@ -87,7 +78,7 @@ export function AcceptOfferModal({ offer, onAccepted }: Props) {
   }
 
   function validate(): boolean {
-    if (address?.toLowerCase() === offer.seller_address.toLowerCase()) {
+    if (smartAddress?.toLowerCase() === offer.seller_address.toLowerCase()) {
       setError('You cannot accept your own offer')
       return false
     }
@@ -111,30 +102,29 @@ export function AcceptOfferModal({ offer, onAccepted }: Props) {
     return true
   }
 
-  function handleAccept() {
+  async function handleAccept() {
+    if (!kernelClient) return
     setError('')
     if (!validate()) return
 
+    setIsSubmitting(true)
     try {
       if (isAsk) {
-        sendCalls({
-          calls: [
-            { to: USDC_ADDRESS, abi: USDC_ABI, functionName: 'approve', args: [MARKET_ADDRESS, totalUsdc] },
-            { to: MARKET_ADDRESS, abi: MARKET_ABI, functionName: 'acceptOffer', args: [BigInt(offer.onchain_offer_id)] },
-          ],
-          capabilities: PAYMASTER_URL ? { paymasterService: { url: PAYMASTER_URL } } : undefined,
-        })
+        await sendBatch(kernelClient, [
+          { address: USDC_ADDRESS, abi: USDC_ABI, functionName: 'approve', args: [MARKET_ADDRESS, totalUsdc] },
+          { address: MARKET_ADDRESS, abi: MARKET_ABI, functionName: 'acceptOffer', args: [BigInt(offer.onchain_offer_id)] },
+        ])
       } else {
-        sendCalls({
-          calls: [
-            { to: TOKEN_ADDRESS, abi: TOKEN_ABI, functionName: 'approve', args: [MARKET_ADDRESS, BigInt(offer.swipe_count)] },
-            { to: MARKET_ADDRESS, abi: MARKET_ABI, functionName: 'acceptOffer', args: [BigInt(offer.onchain_offer_id)] },
-          ],
-          capabilities: PAYMASTER_URL ? { paymasterService: { url: PAYMASTER_URL } } : undefined,
-        })
+        await sendBatch(kernelClient, [
+          { address: TOKEN_ADDRESS, abi: TOKEN_ABI, functionName: 'approve', args: [MARKET_ADDRESS, BigInt(offer.swipe_count)] },
+          { address: MARKET_ADDRESS, abi: MARKET_ABI, functionName: 'acceptOffer', args: [BigInt(offer.onchain_offer_id)] },
+        ])
       }
+      setIsDone(true)
     } catch (e) {
       setError(parseRevertError(e))
+    } finally {
+      setIsSubmitting(false)
     }
   }
 

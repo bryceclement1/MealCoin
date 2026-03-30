@@ -1,7 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { useAccount, useReadContract, useSendCalls, useCallsStatus } from 'wagmi'
+import { useReadContract } from 'wagmi'
+import { useSmartAccount } from '@/contexts/SmartAccountContext'
+import { sendBatch } from '@/lib/kernel-client'
 import { useMSTBalance } from '@/hooks/use-mst-balance'
 import {
   TOKEN_ADDRESS, TOKEN_ABI,
@@ -18,8 +20,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-
-const PAYMASTER_URL = process.env.NEXT_PUBLIC_PAYMASTER_URL
 
 const toUSDC = (dollars: number) => BigInt(Math.round(dollars * 1_000_000))
 
@@ -50,14 +50,14 @@ function isBlackout(): boolean {
 type OfferType = 'ask' | 'bid'
 
 export function CreateOfferModal() {
-  const { address } = useAccount()
-  const { data: mstBalance } = useMSTBalance(address)
+  const { smartAddress, kernelClient } = useSmartAccount()
+  const { data: mstBalance } = useMSTBalance(smartAddress)
   const { data: usdcBalance } = useReadContract({
     address: USDC_ADDRESS,
     abi: USDC_ABI,
     functionName: 'balanceOf',
-    args: address ? [address] : undefined,
-    query: { enabled: !!address },
+    args: smartAddress ? [smartAddress] : undefined,
+    query: { enabled: !!smartAddress },
   })
 
   const [open, setOpen] = useState(false)
@@ -65,26 +65,16 @@ export function CreateOfferModal() {
   const [swipeCount, setSwipeCount] = useState(1)
   const [pricePerSwipe, setPricePerSwipe] = useState('')
   const [error, setError] = useState('')
-
-  const { mutate: sendCalls, data: batchResult, isPending, reset } = useSendCalls()
-
-  const { data: callsStatus } = useCallsStatus({
-    id: batchResult?.id as string,
-    query: {
-      enabled: !!batchResult?.id,
-      refetchInterval: (data) => (data?.status === 'CONFIRMED' ? false : 1000),
-    },
-  })
-
-  const isDone = callsStatus?.status === 'CONFIRMED'
-  const isSubmitting = isPending || (!!batchResult?.id && !isDone)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isDone, setIsDone] = useState(false)
 
   function resetForm() {
     setOfferType('ask')
     setSwipeCount(1)
     setPricePerSwipe('')
     setError('')
-    reset()
+    setIsSubmitting(false)
+    setIsDone(false)
   }
 
   function handleOpenChange(val: boolean) {
@@ -127,34 +117,33 @@ export function CreateOfferModal() {
     return true
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
+    if (!kernelClient) return
     setError('')
     if (!validate()) return
 
     const price = toUSDC(parseFloat(pricePerSwipe))
     const count = BigInt(swipeCount)
 
+    setIsSubmitting(true)
     try {
       if (offerType === 'ask') {
-        sendCalls({
-          calls: [
-            { to: TOKEN_ADDRESS, abi: TOKEN_ABI, functionName: 'approve', args: [MARKET_ADDRESS, count] },
-            { to: MARKET_ADDRESS, abi: MARKET_ABI, functionName: 'createSellOffer', args: [count, price] },
-          ],
-          capabilities: PAYMASTER_URL ? { paymasterService: { url: PAYMASTER_URL } } : undefined,
-        })
+        await sendBatch(kernelClient, [
+          { address: TOKEN_ADDRESS, abi: TOKEN_ABI, functionName: 'approve', args: [MARKET_ADDRESS, count] },
+          { address: MARKET_ADDRESS, abi: MARKET_ABI, functionName: 'createSellOffer', args: [count, price] },
+        ])
       } else {
         const totalUsdc = price * count
-        sendCalls({
-          calls: [
-            { to: USDC_ADDRESS, abi: USDC_ABI, functionName: 'approve', args: [MARKET_ADDRESS, totalUsdc] },
-            { to: MARKET_ADDRESS, abi: MARKET_ABI, functionName: 'createBuyOffer', args: [count, price] },
-          ],
-          capabilities: PAYMASTER_URL ? { paymasterService: { url: PAYMASTER_URL } } : undefined,
-        })
+        await sendBatch(kernelClient, [
+          { address: USDC_ADDRESS, abi: USDC_ABI, functionName: 'approve', args: [MARKET_ADDRESS, totalUsdc] },
+          { address: MARKET_ADDRESS, abi: MARKET_ABI, functionName: 'createBuyOffer', args: [count, price] },
+        ])
       }
+      setIsDone(true)
     } catch (e) {
       setError(parseRevertError(e))
+    } finally {
+      setIsSubmitting(false)
     }
   }
 

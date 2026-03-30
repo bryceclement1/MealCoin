@@ -2,13 +2,15 @@
 
 import useSWR from 'swr'
 import { useAccount } from 'wagmi'
+import { useSmartAccount } from '@/contexts/SmartAccountContext'
 import { fetcher, type HistoryItem } from '@/lib/api'
 
 export function useHistory() {
-  const { address, isConnected } = useAccount()
+  const { isConnected } = useAccount()
+  const { smartAddress } = useSmartAccount()
 
   return useSWR<{ history: HistoryItem[] }>(
-    isConnected && address ? `/api/wallet/${address}/history` : null,
+    isConnected && smartAddress ? `/api/wallet/${smartAddress}/history` : null,
     fetcher,
     { refreshInterval: 30000 }
   )

@@ -1,13 +1,15 @@
 'use client'
 
 import { useAccount } from 'wagmi'
+import { useSmartAccount } from '@/contexts/SmartAccountContext'
 import { useMSTBalance } from '@/hooks/use-mst-balance'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 
 export function BalanceCard() {
-  const { address, isConnected } = useAccount()
-  const { data: balance, isLoading } = useMSTBalance(address)
+  const { isConnected } = useAccount()
+  const { smartAddress } = useSmartAccount()
+  const { data: balance, isLoading } = useMSTBalance(smartAddress)
 
   if (!isConnected) {
     return (

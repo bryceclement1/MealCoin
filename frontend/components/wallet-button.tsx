@@ -1,6 +1,7 @@
 'use client'
 
 import { useAccount, useConnect, useDisconnect } from 'wagmi'
+import { useSmartAccount } from '@/contexts/SmartAccountContext'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -21,20 +22,21 @@ function truncateAddress(address: string) {
 }
 
 export function WalletButton() {
-  const { address, isConnected } = useAccount()
+  const { isConnected } = useAccount()
+  const { smartAddress } = useSmartAccount()
   const { connectors, connect, isPending } = useConnect()
   const { disconnect } = useDisconnect()
   const [open, setOpen] = useState(false)
 
-  if (isConnected && address) {
+  if (isConnected && smartAddress) {
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline">{truncateAddress(address)}</Button>
+          <Button variant="outline">{truncateAddress(smartAddress)}</Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem
-            onClick={() => navigator.clipboard.writeText(address)}
+            onClick={() => navigator.clipboard.writeText(smartAddress)}
           >
             Copy address
           </DropdownMenuItem>

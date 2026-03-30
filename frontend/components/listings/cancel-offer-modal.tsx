@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { useSendCalls, useCallsStatus } from 'wagmi'
+import { useSmartAccount } from '@/contexts/SmartAccountContext'
+import { sendBatch } from '@/lib/kernel-client'
 import { type Offer } from '@/lib/api'
 import { MARKET_ADDRESS, MARKET_ABI } from '@/lib/contracts'
 import { Button } from '@/components/ui/button'
@@ -12,8 +13,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
-
-const PAYMASTER_URL = process.env.NEXT_PUBLIC_PAYMASTER_URL
 
 const REVERT_MESSAGES: Record<string, string> = {
   NotOfferCreator: 'Only the offer creator can cancel',
@@ -35,27 +34,19 @@ interface Props {
 }
 
 export function CancelOfferModal({ offer, onCancelled }: Props) {
+  const { kernelClient } = useSmartAccount()
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isDone, setIsDone] = useState(false)
 
-  const { mutate: sendCalls, data: batchResult, isPending, reset } = useSendCalls()
-
-  const { data: callsStatus } = useCallsStatus({
-    id: batchResult?.id as string,
-    query: {
-      enabled: !!batchResult?.id,
-      refetchInterval: (data) => (data?.status === 'CONFIRMED' ? false : 1000),
-    },
-  })
-
-  const isDone = callsStatus?.status === 'CONFIRMED'
-  const isSubmitting = isPending || (!!batchResult?.id && !isDone)
   const isAsk = offer.type === 'ask'
   const totalUsdcDisplay = (offer.swipe_count * offer.price_per_swipe).toFixed(2)
 
   function resetForm() {
     setError('')
-    reset()
+    setIsSubmitting(false)
+    setIsDone(false)
   }
 
   function handleOpenChange(val: boolean) {
@@ -63,22 +54,19 @@ export function CancelOfferModal({ offer, onCancelled }: Props) {
     if (!val) resetForm()
   }
 
-  function handleCancel() {
+  async function handleCancel() {
+    if (!kernelClient) return
     setError('')
+    setIsSubmitting(true)
     try {
-      sendCalls({
-        calls: [
-          {
-            to: MARKET_ADDRESS,
-            abi: MARKET_ABI,
-            functionName: 'cancelOffer',
-            args: [BigInt(offer.onchain_offer_id)],
-          },
-        ],
-        capabilities: PAYMASTER_URL ? { paymasterService: { url: PAYMASTER_URL } } : undefined,
-      })
+      await sendBatch(kernelClient, [
+        { address: MARKET_ADDRESS, abi: MARKET_ABI, functionName: 'cancelOffer', args: [BigInt(offer.onchain_offer_id)] },
+      ])
+      setIsDone(true)
     } catch (e) {
       setError(parseRevertError(e))
+    } finally {
+      setIsSubmitting(false)
     }
   }
 

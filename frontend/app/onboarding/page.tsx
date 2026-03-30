@@ -2,21 +2,25 @@
 
 import { useState } from 'react'
 import { useAccount } from 'wagmi'
+import { useSmartAccount } from '@/contexts/SmartAccountContext'
 import { Button } from '@/components/ui/button'
 import { WalletButton } from '@/components/wallet-button'
 
 export default function OnboardingPage() {
-  const { address, isConnected } = useAccount()
+  const { isConnected } = useAccount()
+  const { smartAddress: address, isLoading: isSmartLoading } = useSmartAccount()
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [sent, setSent] = useState(false)
 
-  if (!isConnected) {
+  if (!isConnected || isSmartLoading || !address) {
     return (
       <main className="flex min-h-[80vh] flex-col items-center justify-center gap-4">
         <h1 className="text-2xl font-bold">Verify your Davidson email</h1>
-        <p className="text-muted-foreground">Connect your wallet first to continue.</p>
+        <p className="text-muted-foreground">
+          {!isConnected ? 'Connect your wallet first to continue.' : 'Setting up your smart wallet...'}
+        </p>
         <WalletButton />
       </main>
     )

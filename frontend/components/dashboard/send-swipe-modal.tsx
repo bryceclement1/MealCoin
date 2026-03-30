@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { isAddress } from 'viem'
+import { useSmartAccount } from '@/contexts/SmartAccountContext'
 import { useMSTBalance } from '@/hooks/use-mst-balance'
 import { TOKEN_ADDRESS, TOKEN_ABI } from '@/lib/contracts'
 import { Button } from '@/components/ui/button'
@@ -30,15 +30,14 @@ function parseRevertError(error: unknown): string {
 }
 
 export function SendSwipeModal() {
-  const { address } = useAccount()
-  const { data: balance } = useMSTBalance(address)
+  const { smartAddress, kernelClient } = useSmartAccount()
+  const { data: balance } = useMSTBalance(smartAddress)
   const [open, setOpen] = useState(false)
   const [recipient, setRecipient] = useState('')
   const [count, setCount] = useState(1)
   const [error, setError] = useState('')
-
-  const { writeContract, data: txHash, isPending, reset } = useWriteContract()
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash })
+  const [isPending, setIsPending] = useState(false)
+  const [isSuccess, setIsSuccess] = useState(false)
 
   const maxBalance = Number(balance ?? 0)
 
@@ -48,11 +47,13 @@ export function SendSwipeModal() {
       setRecipient('')
       setCount(1)
       setError('')
-      reset()
+      setIsPending(false)
+      setIsSuccess(false)
     }
   }
 
   async function handleSend() {
+    if (!kernelClient) return
     setError('')
 
     if (!isAddress(recipient)) {
@@ -64,15 +65,19 @@ export function SendSwipeModal() {
       return
     }
 
+    setIsPending(true)
     try {
-      writeContract({
+      await kernelClient.writeContract({
         address: TOKEN_ADDRESS,
         abi: TOKEN_ABI,
         functionName: 'transfer',
         args: [recipient as `0x${string}`, BigInt(count)],
       })
+      setIsSuccess(true)
     } catch (e) {
       setError(parseRevertError(e))
+    } finally {
+      setIsPending(false)
     }
   }
 
@@ -105,7 +110,7 @@ export function SendSwipeModal() {
                 placeholder="0x..."
                 value={recipient}
                 onChange={(e) => setRecipient(e.target.value)}
-                disabled={isPending || isConfirming}
+                disabled={isPending}
               />
             </div>
 
@@ -118,7 +123,7 @@ export function SendSwipeModal() {
                 max={maxBalance}
                 value={count}
                 onChange={(e) => setCount(Number(e.target.value))}
-                disabled={isPending || isConfirming}
+                disabled={isPending}
               />
             </div>
 
@@ -127,13 +132,9 @@ export function SendSwipeModal() {
             <Button
               className="w-full"
               onClick={handleSend}
-              disabled={isPending || isConfirming}
+              disabled={isPending}
             >
-              {isPending
-                ? 'Confirm in wallet...'
-                : isConfirming
-                ? 'Sending...'
-                : 'Send'}
+              {isPending ? 'Processing...' : 'Send'}
             </Button>
           </div>
         )}

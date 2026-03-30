@@ -1,6 +1,6 @@
 'use client'
 
-import { useAccount } from 'wagmi'
+import { useSmartAccount } from '@/contexts/SmartAccountContext'
 import { useAsks, useBids } from '@/hooks/use-offers'
 import { type Offer } from '@/lib/api'
 import { AcceptOfferModal } from '@/components/listings/accept-offer-modal'
@@ -15,7 +15,7 @@ interface Props {
 }
 
 export function OfferList({ type }: Props) {
-  const { address } = useAccount()
+  const { smartAddress: address } = useSmartAccount()
   const asksResult = useAsks()
   const bidsResult = useBids()
 
@@ -24,7 +24,9 @@ export function OfferList({ type }: Props) {
       ? { ...asksResult, data: asksResult.data }
       : { ...bidsResult, data: bidsResult.data }
 
-  const rawOffers = type === 'ask' ? data?.asks : data?.bids
+  const rawOffers = type === 'ask'
+    ? (data as { asks: Offer[] } | undefined)?.asks
+    : (data as { bids: Offer[] } | undefined)?.bids
   const offers: Offer[] = (rawOffers ?? []).map((o) => ({ ...o, type }))
 
   if (isLoading) {

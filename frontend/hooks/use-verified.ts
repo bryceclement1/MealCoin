@@ -2,18 +2,20 @@
 
 import useSWR from 'swr'
 import { useAccount } from 'wagmi'
+import { useSmartAccount } from '@/contexts/SmartAccountContext'
 import { fetcher } from '@/lib/api'
 
 export function useVerified() {
-  const { address, isConnected } = useAccount()
+  const { isConnected } = useAccount()
+  const { smartAddress } = useSmartAccount()
 
   const { data } = useSWR(
-    isConnected && address ? `/api/students?wallet=${address}` : null,
+    isConnected && smartAddress ? `/api/students?wallet=${smartAddress}` : null,
     fetcher
   )
 
   return {
     isVerified: data?.verified === true,
-    isLoading: isConnected && !!address && data === undefined,
+    isLoading: isConnected && !!smartAddress && data === undefined,
   }
 }

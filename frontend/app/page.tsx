@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAccount } from 'wagmi'
+import { useSmartAccount } from '@/contexts/SmartAccountContext'
 import { useVerified } from '@/hooks/use-verified'
 import { BalanceCard } from '@/components/dashboard/balance-card'
 import { ExpiryCountdown } from '@/components/dashboard/expiry-countdown'
@@ -10,8 +11,12 @@ import { SendSwipeModal } from '@/components/dashboard/send-swipe-modal'
 
 export default function Home() {
   const { isConnected } = useAccount()
-  const { isVerified, isLoading } = useVerified()
+  const { smartAddress, isLoading: isSmartLoading } = useSmartAccount()
+  const { isVerified, isLoading: isVerifiedLoading } = useVerified()
   const router = useRouter()
+
+  // Wait for smart account to resolve before checking verification status
+  const isLoading = isSmartLoading || (!!smartAddress && isVerifiedLoading)
 
   useEffect(() => {
     if (isConnected && !isLoading && !isVerified) {
