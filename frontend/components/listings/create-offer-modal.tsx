@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi'
+import { useState } from 'react'
+import { useAccount, useReadContract, useSendCalls, useCallsStatus } from 'wagmi'
 import { useMSTBalance } from '@/hooks/use-mst-balance'
 import {
   TOKEN_ADDRESS, TOKEN_ABI,
@@ -18,6 +18,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
+
+const PAYMASTER_URL = process.env.NEXT_PUBLIC_PAYMASTER_URL
 
 const toUSDC = (dollars: number) => BigInt(Math.round(dollars * 1_000_000))
 
@@ -46,7 +48,6 @@ function isBlackout(): boolean {
 }
 
 type OfferType = 'ask' | 'bid'
-type Step = 'idle' | 'approving' | 'creating' | 'done'
 
 export function CreateOfferModal() {
   const { address } = useAccount()
@@ -64,88 +65,26 @@ export function CreateOfferModal() {
   const [swipeCount, setSwipeCount] = useState(1)
   const [pricePerSwipe, setPricePerSwipe] = useState('')
   const [error, setError] = useState('')
-  const [step, setStep] = useState<Step>('idle')
 
-  const {
-    writeContract: writeApprove,
-    data: approveTxHash,
-    reset: resetApprove,
-  } = useWriteContract()
+  const { mutate: sendCalls, data: batchResult, isPending, reset } = useSendCalls()
 
-  const {
-    writeContract: writeCreate,
-    data: createTxHash,
-    reset: resetCreate,
-  } = useWriteContract()
+  const { data: callsStatus } = useCallsStatus({
+    id: batchResult?.id as string,
+    query: {
+      enabled: !!batchResult?.id,
+      refetchInterval: (data) => (data?.status === 'CONFIRMED' ? false : 1000),
+    },
+  })
 
-  const approveReceipt = useWaitForTransactionReceipt({ hash: approveTxHash })
-  const createReceipt = useWaitForTransactionReceipt({ hash: createTxHash })
-
-  // When approval confirms, automatically submit the create tx
-  useEffect(() => {
-    if (approveReceipt.isSuccess && step === 'approving') {
-      setStep('creating')
-      const price = toUSDC(parseFloat(pricePerSwipe))
-      const count = BigInt(swipeCount)
-      try {
-        if (offerType === 'ask') {
-          writeCreate({
-            address: MARKET_ADDRESS,
-            abi: MARKET_ABI,
-            functionName: 'createSellOffer',
-            args: [count, price],
-          })
-        } else {
-          writeCreate({
-            address: MARKET_ADDRESS,
-            abi: MARKET_ABI,
-            functionName: 'createBuyOffer',
-            args: [count, price],
-          })
-        }
-      } catch (e) {
-        setError(parseRevertError(e))
-        setStep('idle')
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [approveReceipt.isSuccess])
-
-  // When create confirms, mark done
-  useEffect(() => {
-    if (createReceipt.isSuccess && step === 'creating') {
-      setStep('done')
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [createReceipt.isSuccess])
-
-  // Handle failed receipts — reset to idle so user can retry
-  useEffect(() => {
-    if (approveReceipt.isError && step === 'approving') {
-      setError(parseRevertError(approveReceipt.error))
-      setStep('idle')
-      resetApprove()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [approveReceipt.isError])
-
-  useEffect(() => {
-    if (createReceipt.isError && step === 'creating') {
-      setError(parseRevertError(createReceipt.error))
-      setStep('idle')
-      resetCreate()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [createReceipt.isError])
+  const isDone = callsStatus?.status === 'CONFIRMED'
+  const isSubmitting = isPending || (!!batchResult?.id && !isDone)
 
   function resetForm() {
     setOfferType('ask')
     setSwipeCount(1)
     setPricePerSwipe('')
     setError('')
-    setStep('idle')
-    resetApprove()
-    resetCreate()
+    reset()
   }
 
   function handleOpenChange(val: boolean) {
@@ -195,38 +134,31 @@ export function CreateOfferModal() {
     const price = toUSDC(parseFloat(pricePerSwipe))
     const count = BigInt(swipeCount)
 
-    setStep('approving')
     try {
       if (offerType === 'ask') {
-        writeApprove({
-          address: TOKEN_ADDRESS,
-          abi: TOKEN_ABI,
-          functionName: 'approve',
-          args: [MARKET_ADDRESS, count],
+        sendCalls({
+          calls: [
+            { to: TOKEN_ADDRESS, abi: TOKEN_ABI, functionName: 'approve', args: [MARKET_ADDRESS, count] },
+            { to: MARKET_ADDRESS, abi: MARKET_ABI, functionName: 'createSellOffer', args: [count, price] },
+          ],
+          capabilities: PAYMASTER_URL ? { paymasterService: { url: PAYMASTER_URL } } : undefined,
         })
       } else {
         const totalUsdc = price * count
-        writeApprove({
-          address: USDC_ADDRESS,
-          abi: USDC_ABI,
-          functionName: 'approve',
-          args: [MARKET_ADDRESS, totalUsdc],
+        sendCalls({
+          calls: [
+            { to: USDC_ADDRESS, abi: USDC_ABI, functionName: 'approve', args: [MARKET_ADDRESS, totalUsdc] },
+            { to: MARKET_ADDRESS, abi: MARKET_ABI, functionName: 'createBuyOffer', args: [count, price] },
+          ],
+          capabilities: PAYMASTER_URL ? { paymasterService: { url: PAYMASTER_URL } } : undefined,
         })
       }
     } catch (e) {
       setError(parseRevertError(e))
-      setStep('idle')
     }
   }
 
-  const isPending = step === 'approving' || step === 'creating'
   const blackout = isBlackout()
-
-  function stepLabel() {
-    if (step === 'approving') return 'Step 1 of 2: Approving...'
-    if (step === 'creating') return 'Step 2 of 2: Creating offer...'
-    return null
-  }
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -238,7 +170,7 @@ export function CreateOfferModal() {
           <DialogTitle>Create Offer</DialogTitle>
         </DialogHeader>
 
-        {step === 'done' ? (
+        {isDone ? (
           <div className="py-6 text-center space-y-2">
             <p className="text-2xl">✓</p>
             <p className="font-medium">Offer created!</p>
@@ -257,7 +189,7 @@ export function CreateOfferModal() {
                   variant={offerType === 'ask' ? 'default' : 'outline'}
                   className="flex-1"
                   onClick={() => setOfferType('ask')}
-                  disabled={isPending}
+                  disabled={isSubmitting}
                 >
                   Ask (Sell)
                 </Button>
@@ -266,7 +198,7 @@ export function CreateOfferModal() {
                   variant={offerType === 'bid' ? 'default' : 'outline'}
                   className="flex-1"
                   onClick={() => setOfferType('bid')}
-                  disabled={isPending}
+                  disabled={isSubmitting}
                 >
                   Bid (Buy)
                 </Button>
@@ -286,7 +218,7 @@ export function CreateOfferModal() {
                 max={6}
                 value={swipeCount}
                 onChange={(e) => setSwipeCount(Number(e.target.value))}
-                disabled={isPending}
+                disabled={isSubmitting}
               />
             </div>
 
@@ -302,18 +234,18 @@ export function CreateOfferModal() {
                 placeholder="7.00"
                 value={pricePerSwipe}
                 onChange={(e) => setPricePerSwipe(e.target.value)}
-                disabled={isPending}
+                disabled={isSubmitting}
               />
             </div>
 
-            {blackout && !isPending && (
+            {blackout && !isSubmitting && (
               <p className="text-sm text-destructive">
                 Offers are disabled during Saturday night blackout (11:55 PM – midnight).
               </p>
             )}
 
-            {stepLabel() && (
-              <p className="text-sm text-muted-foreground">{stepLabel()}</p>
+            {isSubmitting && (
+              <p className="text-sm text-muted-foreground">Submitting offer...</p>
             )}
 
             {error && <p className="text-sm text-destructive">{error}</p>}
@@ -321,9 +253,9 @@ export function CreateOfferModal() {
             <Button
               className="w-full"
               onClick={handleSubmit}
-              disabled={isPending || blackout}
+              disabled={isSubmitting || blackout}
             >
-              {isPending ? stepLabel() : 'Post Offer'}
+              {isSubmitting ? 'Submitting...' : 'Post Offer'}
             </Button>
           </div>
         )}

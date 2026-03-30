@@ -3,11 +3,11 @@ import { loadLastBlock, saveLastBlock } from './state'
 import { pollOnce } from './poller'
 import { sleep } from './retry'
 import { createPublicClient, http } from 'viem'
-import { baseSepolia } from 'viem/chains'
+import { base } from 'viem/chains'
 import { registerExpiryCron } from './cron/expireOffers'
 
 const client = createPublicClient({
-  chain: baseSepolia,
+  chain: base,
   transport: http(config.rpcUrl),
 })
 

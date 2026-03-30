@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
+import { useState } from 'react'
+import { useSendCalls, useCallsStatus } from 'wagmi'
 import { type Offer } from '@/lib/api'
 import { MARKET_ADDRESS, MARKET_ABI } from '@/lib/contracts'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog'
+
+const PAYMASTER_URL = process.env.NEXT_PUBLIC_PAYMASTER_URL
 
 const REVERT_MESSAGES: Record<string, string> = {
   NotOfferCreator: 'Only the offer creator can cancel',
@@ -27,8 +29,6 @@ function parseRevertError(error: unknown): string {
   return 'Transaction failed. Please try again.'
 }
 
-type Step = 'idle' | 'cancelling' | 'done'
-
 interface Props {
   offer: Offer
   onCancelled: () => void
@@ -37,33 +37,24 @@ interface Props {
 export function CancelOfferModal({ offer, onCancelled }: Props) {
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
-  const [step, setStep] = useState<Step>('idle')
 
-  const { writeContract, data: txHash, reset } = useWriteContract()
-  const receipt = useWaitForTransactionReceipt({ hash: txHash })
+  const { mutate: sendCalls, data: batchResult, isPending, reset } = useSendCalls()
 
+  const { data: callsStatus } = useCallsStatus({
+    id: batchResult?.id as string,
+    query: {
+      enabled: !!batchResult?.id,
+      refetchInterval: (data) => (data?.status === 'CONFIRMED' ? false : 1000),
+    },
+  })
+
+  const isDone = callsStatus?.status === 'CONFIRMED'
+  const isSubmitting = isPending || (!!batchResult?.id && !isDone)
   const isAsk = offer.type === 'ask'
   const totalUsdcDisplay = (offer.swipe_count * offer.price_per_swipe).toFixed(2)
 
-  useEffect(() => {
-    if (receipt.isSuccess && step === 'cancelling') {
-      setStep('done')
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [receipt.isSuccess])
-
-  useEffect(() => {
-    if (receipt.isError && step === 'cancelling') {
-      setError(parseRevertError(receipt.error))
-      setStep('idle')
-      reset()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [receipt.isError])
-
   function resetForm() {
     setError('')
-    setStep('idle')
     reset()
   }
 
@@ -74,21 +65,22 @@ export function CancelOfferModal({ offer, onCancelled }: Props) {
 
   function handleCancel() {
     setError('')
-    setStep('cancelling')
     try {
-      writeContract({
-        address: MARKET_ADDRESS,
-        abi: MARKET_ABI,
-        functionName: 'cancelOffer',
-        args: [BigInt(offer.onchain_offer_id)],
+      sendCalls({
+        calls: [
+          {
+            to: MARKET_ADDRESS,
+            abi: MARKET_ABI,
+            functionName: 'cancelOffer',
+            args: [BigInt(offer.onchain_offer_id)],
+          },
+        ],
+        capabilities: PAYMASTER_URL ? { paymasterService: { url: PAYMASTER_URL } } : undefined,
       })
     } catch (e) {
       setError(parseRevertError(e))
-      setStep('idle')
     }
   }
-
-  const isPending = step === 'cancelling'
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -100,7 +92,7 @@ export function CancelOfferModal({ offer, onCancelled }: Props) {
           <DialogTitle>Cancel Offer</DialogTitle>
         </DialogHeader>
 
-        {step === 'done' ? (
+        {isDone ? (
           <div className="py-6 text-center space-y-2">
             <p className="text-2xl">✓</p>
             <p className="font-medium">Offer cancelled!</p>
@@ -131,7 +123,7 @@ export function CancelOfferModal({ offer, onCancelled }: Props) {
               )}
             </div>
 
-            {isPending && (
+            {isSubmitting && (
               <p className="text-sm text-muted-foreground">Cancelling offer...</p>
             )}
 
@@ -141,9 +133,9 @@ export function CancelOfferModal({ offer, onCancelled }: Props) {
               className="w-full"
               variant="destructive"
               onClick={handleCancel}
-              disabled={isPending}
+              disabled={isSubmitting}
             >
-              {isPending ? 'Cancelling...' : 'Confirm Cancel'}
+              {isSubmitting ? 'Cancelling...' : 'Confirm Cancel'}
             </Button>
           </div>
         )}

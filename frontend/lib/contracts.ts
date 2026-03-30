@@ -1,6 +1,5 @@
 import MealSwipeTokenJson from '../contracts/MealSwipeToken.json'
 import MarketplaceJson from '../contracts/Marketplace.json'
-import MockUSDCJson from '../contracts/MockUSDC.json'
 
 export const TOKEN_ADDRESS  = process.env.NEXT_PUBLIC_TOKEN_ADDRESS  as `0x${string}`
 export const MARKET_ADDRESS = process.env.NEXT_PUBLIC_MARKET_ADDRESS as `0x${string}`
@@ -8,4 +7,34 @@ export const USDC_ADDRESS   = process.env.NEXT_PUBLIC_USDC_ADDRESS   as `0x${str
 
 export const TOKEN_ABI  = MealSwipeTokenJson.abi
 export const MARKET_ABI = MarketplaceJson.abi
-export const USDC_ABI   = MockUSDCJson.abi
+
+// Minimal ERC-20 ABI — only the functions MealCoin calls on USDC
+export const USDC_ABI = [
+  {
+    name: 'approve',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    name: 'allowance',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'spender', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'balanceOf',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const
