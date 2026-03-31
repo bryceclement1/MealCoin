@@ -3,6 +3,7 @@
 import { BalanceCard } from '@/components/dashboard/balance-card'
 import { ExpiryCountdown } from '@/components/dashboard/expiry-countdown'
 import { SendSwipeModal } from '@/components/dashboard/send-swipe-modal'
+import { SendUSDCModal } from '@/components/dashboard/send-usdc-modal'
 
 export default function Home() {
   return (
@@ -12,7 +13,10 @@ export default function Home() {
         <BalanceCard />
         <ExpiryCountdown />
       </div>
-      <SendSwipeModal />
+      <div className="flex gap-3">
+        <SendSwipeModal />
+        <SendUSDCModal />
+      </div>
     </main>
   )
 }

@@ -11,6 +11,16 @@ export const MARKET_ABI = MarketplaceJson.abi
 // Minimal ERC-20 ABI — only the functions MealCoin calls on USDC
 export const USDC_ABI = [
   {
+    name: 'transfer',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
     name: 'approve',
     type: 'function',
     stateMutability: 'nonpayable',
