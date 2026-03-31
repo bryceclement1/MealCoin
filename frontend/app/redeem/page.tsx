@@ -128,8 +128,14 @@ function DiningTerminal({ cashierAddress }: { cashierAddress: `0x${string}` }) {
             if (isAddress(decodedText)) {
               setStudentAddr(decodedText)
               setScannerError('')
-              html5QrScanner!.stop().catch(() => {})
+              // Null out before setScannerOpen(false) so the cleanup effect
+              // doesn't attempt a second .stop() on an already-stopped scanner.
+              // Use try/catch because .stop() throws synchronously (not a rejected
+              // promise) when the scanner is not in a running state.
+              const scanner = html5QrScanner
+              html5QrScanner = null
               qrScannerRef.current = null
+              try { scanner?.stop() } catch (_) {}
               setScannerOpen(false)
             } else {
               setScannerError('QR code is not a valid wallet address')
@@ -152,8 +158,10 @@ function DiningTerminal({ cashierAddress }: { cashierAddress: `0x${string}` }) {
     return () => {
       stopped = true
       if (html5QrScanner) {
-        html5QrScanner.stop().catch(() => {})
+        const scanner = html5QrScanner
+        html5QrScanner = null
         qrScannerRef.current = null
+        try { scanner.stop() } catch (_) {}
       }
     }
   }, [scannerOpen])
