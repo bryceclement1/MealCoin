@@ -1,17 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { supabase, supabaseAuth } from '@/lib/supabase'
 import { validateWalletAddress, validateDavidsonEmail, validationError } from '@/lib/validate'
-import nodemailer from 'nodemailer'
-
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false,
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD?.replace(/\s/g, ''),
-  },
-})
 
 export async function POST(req: NextRequest) {
   const { wallet_address, davidson_email } = await req.json()
@@ -39,23 +28,18 @@ export async function POST(req: NextRequest) {
   }
 
   const appUrl = process.env.APP_URL ?? 'http://localhost:3000'
-  const verifyLink = `${appUrl}/api/verify/confirm?token=${token}`
 
-  try {
-    await transporter.sendMail({
-      from: `MealCoin <${process.env.GMAIL_USER}>`,
-      to: normalizedEmail,
-      subject: 'Verify your Davidson email for MealCoin',
-      html: `
-        <p>Hi,</p>
-        <p>Click the link below to verify your Davidson email and activate your MealCoin account.</p>
-        <p><a href="${verifyLink}" style="font-size:16px;font-weight:bold">Verify my email</a></p>
-        <p>This link expires in 15 minutes.</p>
-        <p>If you didn't request this, you can ignore this email.</p>
-      `,
-    })
-  } catch (err) {
-    console.error('[verify] Failed to send email:', err)
+  // Supabase sends the email (good deliverability for Davidson's Exchange filters).
+  // emailRedirectTo includes our custom ?token= so the confirm route can verify
+  // server-side without any client-side wallet or JS needed.
+  const { error: otpError } = await supabaseAuth.auth.signInWithOtp({
+    email: normalizedEmail,
+    options: {
+      emailRedirectTo: `${appUrl}/api/verify/confirm?token=${token}`,
+    },
+  })
+
+  if (otpError) {
     return NextResponse.json({ error: 'Failed to send verification email' }, { status: 500 })
   }
 
