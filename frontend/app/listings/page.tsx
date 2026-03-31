@@ -1,5 +1,5 @@
 import { CreateOfferModal } from '@/components/listings/create-offer-modal'
-import { OfferList } from '@/components/listings/offer-list'
+import { ListingsClient } from '@/components/listings/listings-client'
 
 export default function ListingsPage() {
   return (
@@ -8,17 +8,8 @@ export default function ListingsPage() {
         <h1 className="text-2xl font-bold">Offer Listings</h1>
         <CreateOfferModal />
       </div>
-
-      <div className="mt-8 space-y-6">
-        <section>
-          <h2 className="text-lg font-semibold mb-3">Asks (Selling)</h2>
-          <OfferList type="ask" />
-        </section>
-
-        <section>
-          <h2 className="text-lg font-semibold mb-3">Bids (Buying)</h2>
-          <OfferList type="bid" />
-        </section>
+      <div className="mt-6">
+        <ListingsClient />
       </div>
     </main>
   )
