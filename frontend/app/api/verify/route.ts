@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase, supabaseAuth } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { validateWalletAddress, validateDavidsonEmail, validationError } from '@/lib/validate'
+import { Resend } from 'resend'
+
+const resend = new Resend(process.env.RESEND_API_KEY)
 
 export async function POST(req: NextRequest) {
   const { wallet_address, davidson_email } = await req.json()
@@ -16,7 +19,6 @@ export async function POST(req: NextRequest) {
   const normalizedWallet = wallet_address.toLowerCase()
   const normalizedEmail = davidson_email.toLowerCase()
 
-  // Generate verification token
   const token = crypto.randomUUID()
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
 
@@ -29,15 +31,22 @@ export async function POST(req: NextRequest) {
   }
 
   const appUrl = process.env.APP_URL ?? 'http://localhost:3000'
+  const verifyLink = `${appUrl}/api/verify/confirm?token=${token}`
 
-  const { error: otpError } = await supabaseAuth.auth.signInWithOtp({
-    email: normalizedEmail,
-    options: {
-      emailRedirectTo: `${appUrl}/onboarding/confirm`,
-    },
+  const { error: emailError } = await resend.emails.send({
+    from: 'MealCoin <onboarding@resend.dev>',
+    to: normalizedEmail,
+    subject: 'Verify your Davidson email for MealCoin',
+    html: `
+      <p>Hi,</p>
+      <p>Click the link below to verify your Davidson email and activate your MealCoin account.</p>
+      <p><a href="${verifyLink}" style="font-size:16px;font-weight:bold">Verify my email</a></p>
+      <p>This link expires in 15 minutes.</p>
+      <p>If you didn't request this, you can ignore this email.</p>
+    `,
   })
 
-  if (otpError) {
+  if (emailError) {
     return NextResponse.json({ error: 'Failed to send verification email' }, { status: 500 })
   }
 
