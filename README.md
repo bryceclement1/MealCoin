@@ -4,7 +4,7 @@
 
 A blockchain-backed peer-to-peer marketplace for Davidson College meal swipes. Students can buy, sell, send, and redeem meal swipes through a web app. Every transaction is enforced by smart contracts — fake listings are structurally impossible, and all swipes in circulation are backed by on-chain escrow. Unused swipes are burned at the end of each week.
 
-**Live app:** [meal-coin.vercel.app](https://meal-coin.vercel.app)  
+**Live app:** [meal-coin.vercel.app](https://meal-coin-five.vercel.app/)  
 **Network:** Base Mainnet (Chain ID 8453)
 
 ---
