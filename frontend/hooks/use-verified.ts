@@ -9,13 +9,15 @@ export function useVerified() {
   const { isConnected } = useAccount()
   const { smartAddress } = useSmartAccount()
 
-  const { data } = useSWR(
+  const { data, isValidating } = useSWR(
     isConnected && smartAddress ? `/api/students?wallet=${smartAddress}` : null,
     fetcher
   )
 
   return {
     isVerified: data?.verified === true,
-    isLoading: isConnected && !!smartAddress && data === undefined,
+    // Treat any in-flight SWR request (initial load or revalidation) as loading
+    // so the guard never redirects on stale data during navigation
+    isLoading: isConnected && !!smartAddress && (data === undefined || isValidating),
   }
 }
