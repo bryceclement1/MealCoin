@@ -7,27 +7,49 @@ import { AcceptOfferModal } from '@/components/listings/accept-offer-modal'
 import { CancelOfferModal } from '@/components/listings/cancel-offer-modal'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { type OfferFilters } from '@/components/listings/filter-box'
 
 const truncate = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
 
-interface Props {
-  type: 'ask' | 'bid'
+function applyFilters(offers: Offer[], filters: OfferFilters): Offer[] {
+  return offers.filter((offer) => {
+    if (filters.maxSwipes !== '' && offer.swipe_count > filters.maxSwipes) return false
+    if (filters.maxPrice !== '' && offer.price_per_swipe > Number(filters.maxPrice)) return false
+    return true
+  })
 }
 
-export function OfferList({ type }: Props) {
+function applySortOrder(offers: Offer[], sortOrder: OfferFilters['sortOrder']): Offer[] {
+  return [...offers].sort((a, b) =>
+    sortOrder === 'price_asc'
+      ? a.price_per_swipe - b.price_per_swipe
+      : b.swipe_count - a.swipe_count
+  )
+}
+
+function hasActiveFilters(filters: OfferFilters): boolean {
+  return filters.maxSwipes !== '' || filters.maxPrice !== ''
+}
+
+interface Props {
+  type: 'ask' | 'bid'
+  filters: OfferFilters
+}
+
+export function OfferList({ type, filters }: Props) {
   const { smartAddress: address } = useSmartAccount()
   const asksResult = useAsks()
   const bidsResult = useBids()
 
-  const { data, isLoading, mutate } =
-    type === 'ask'
-      ? { ...asksResult, data: asksResult.data }
-      : { ...bidsResult, data: bidsResult.data }
+  const isLoading = type === 'ask' ? asksResult.isLoading : bidsResult.isLoading
+  const mutate = type === 'ask' ? asksResult.mutate : bidsResult.mutate
 
-  const rawOffers = type === 'ask'
-    ? (data as { asks: Offer[] } | undefined)?.asks
-    : (data as { bids: Offer[] } | undefined)?.bids
-  const offers: Offer[] = (rawOffers ?? []).map((o) => ({ ...o, type }))
+  const rawOffers: Offer[] =
+    type === 'ask'
+      ? (asksResult.data?.asks ?? [])
+      : (bidsResult.data?.bids ?? [])
+  const allOffers: Offer[] = rawOffers.map((o) => ({ ...o, type }))
+  const offers = applySortOrder(applyFilters(allOffers, filters), filters.sortOrder)
 
   if (isLoading) {
     return (
@@ -40,9 +62,12 @@ export function OfferList({ type }: Props) {
   }
 
   if (offers.length === 0) {
+    const filtersActive = hasActiveFilters(filters)
     return (
       <p className="text-muted-foreground text-sm">
-        No {type === 'ask' ? 'ask' : 'bid'} offers yet.
+        {filtersActive && allOffers.length > 0
+          ? 'No offers match the current filters.'
+          : `No ${type === 'ask' ? 'ask' : 'bid'} offers yet.`}
       </p>
     )
   }
