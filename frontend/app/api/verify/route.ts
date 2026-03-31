@@ -40,6 +40,7 @@ export async function POST(req: NextRequest) {
   })
 
   if (otpError) {
+    console.error('[verify] Supabase OTP error:', otpError.message, otpError.status)
     return NextResponse.json({ error: 'Failed to send verification email' }, { status: 500 })
   }
 
