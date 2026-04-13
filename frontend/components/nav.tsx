@@ -10,6 +10,12 @@ export function Nav() {
             MealCoin
           </Link>
           <Link
+            href="/"
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Dashboard
+          </Link>
+          <Link
             href="/listings"
             className="text-sm text-muted-foreground hover:text-foreground transition-colors"
           >

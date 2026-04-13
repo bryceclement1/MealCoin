@@ -22,7 +22,11 @@ export function VerificationGuard({ children }: { children: React.ReactNode }) {
   const isLoading = isSmartLoading || !smartAddress || isVerifiedLoading
 
   useEffect(() => {
-    if (isPublicPath) return
+    if (isPublicPath) {
+      // Redirect verified users away from onboarding to the dashboard
+      if (!isLoading && isConnected && isVerified) router.push('/')
+      return
+    }
     if (!isConnected) return
     if (isLoading) return
     if (!isVerified) router.push('/onboarding')
