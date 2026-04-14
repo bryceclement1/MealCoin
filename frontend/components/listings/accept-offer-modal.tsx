@@ -1,3 +1,17 @@
+/**
+ * Modal for accepting an existing marketplace offer.
+ *
+ * Accepting requires two on-chain steps batched into a single UserOp:
+ *   - Accepting an ask (seller wants USDC): approve USDC + acceptOffer
+ *   - Accepting a bid (buyer wants swipes): approve MST + acceptOffer
+ *
+ * The accept is atomic on-chain — both assets swap in the same transaction,
+ * so neither party can be left without their asset if one step fails.
+ *
+ * A blackout window at 11:55 PM Saturday prevents accepting offers just
+ * before the weekly token burn invalidates them.
+ */
+
 'use client'
 
 import { useState } from 'react'
@@ -20,6 +34,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 
+/** Map known contract revert reasons to user-friendly messages. */
 const REVERT_MESSAGES: Record<string, string> = {
   CannotAcceptOwnOffer: 'You cannot accept your own offer',
   OfferIsExpired: 'This offer has expired',
@@ -29,6 +44,10 @@ const REVERT_MESSAGES: Record<string, string> = {
   InsufficientBalance: 'Insufficient balance',
 }
 
+/**
+ * Parse a transaction error and return a human-readable message.
+ * Falls back to a generic message if the revert reason is not recognized.
+ */
 function parseRevertError(error: unknown): string {
   console.error('[acceptOffer] tx error:', error)
   const msg = error instanceof Error ? error.message : String(error)
@@ -38,6 +57,11 @@ function parseRevertError(error: unknown): string {
   return 'Transaction failed. Please try again.'
 }
 
+/**
+ * Return true if it is Saturday 11:55 PM or later.
+ * Accepting offers in this window is blocked because the tokens will burn
+ * at midnight, making any pending offers void.
+ */
 function isBlackout(): boolean {
   const now = new Date()
   return now.getDay() === 6 && now.getHours() === 23 && now.getMinutes() >= 55
@@ -48,6 +72,11 @@ interface Props {
   onAccepted: () => void
 }
 
+/**
+ * Render the "Accept" button and its confirmation dialog.
+ * Shows a summary of the trade (what the user pays and receives) before confirming.
+ * Calls onAccepted() after a successful transaction to refresh the listings.
+ */
 export function AcceptOfferModal({ offer, onAccepted }: Props) {
   const { smartAddress, kernelClient } = useSmartAccount()
   const { data: mstBalance } = useMSTBalance(smartAddress)
@@ -65,19 +94,26 @@ export function AcceptOfferModal({ offer, onAccepted }: Props) {
   const [isDone, setIsDone] = useState(false)
 
   const isAsk = offer.type === 'ask'
+  // Pre-compute total USDC in 6-decimal units for the approval amount
   const totalUsdc = BigInt(Math.round(offer.swipe_count * offer.price_per_swipe * 1_000_000))
 
+  /** Reset form state when the dialog closes. */
   function resetForm() {
     setError('')
     setIsSubmitting(false)
     setIsDone(false)
   }
 
+  /** Reset form state when the dialog closes. */
   function handleOpenChange(val: boolean) {
     setOpen(val)
     if (!val) resetForm()
   }
 
+  /**
+   * Validate that the user can afford to accept this offer.
+   * Mirrors on-chain constraints to give early feedback before submitting a tx.
+   */
   function validate(): boolean {
     if (smartAddress?.toLowerCase() === offer.seller_address.toLowerCase()) {
       setError('You cannot accept your own offer')
@@ -88,12 +124,14 @@ export function AcceptOfferModal({ offer, onAccepted }: Props) {
       return false
     }
     if (isAsk) {
+      // Accepting a sell offer: user needs enough USDC
       const usdc = (usdcBalance as bigint | undefined) ?? BigInt(0)
       if (totalUsdc > usdc) {
         setError("You don't have enough USDC")
         return false
       }
     } else {
+      // Accepting a buy offer: user needs enough swipes
       const mst = (mstBalance as bigint | undefined) ?? BigInt(0)
       if (BigInt(offer.swipe_count) > mst) {
         setError("You don't have enough swipes")
@@ -103,6 +141,10 @@ export function AcceptOfferModal({ offer, onAccepted }: Props) {
     return true
   }
 
+  /**
+   * Submit the accept transaction.
+   * Batches the token approval + acceptOffer call into a single UserOp.
+   */
   async function handleAccept() {
     if (!kernelClient) return
     setError('')
@@ -111,11 +153,13 @@ export function AcceptOfferModal({ offer, onAccepted }: Props) {
     setIsSubmitting(true)
     try {
       if (isAsk) {
+        // Accepting a sell: pay USDC, receive swipes
         await sendBatch(kernelClient, [
           { address: USDC_ADDRESS, abi: USDC_ABI, functionName: 'approve', args: [MARKET_ADDRESS, totalUsdc] },
           { address: MARKET_ADDRESS, abi: MARKET_ABI, functionName: 'acceptOffer', args: [BigInt(offer.onchain_offer_id)] },
         ])
       } else {
+        // Accepting a buy: send swipes, receive USDC
         await sendBatch(kernelClient, [
           { address: TOKEN_ADDRESS, abi: TOKEN_ABI, functionName: 'approve', args: [MARKET_ADDRESS, BigInt(offer.swipe_count)] },
           { address: MARKET_ADDRESS, abi: MARKET_ABI, functionName: 'acceptOffer', args: [BigInt(offer.onchain_offer_id)] },
@@ -154,6 +198,7 @@ export function AcceptOfferModal({ offer, onAccepted }: Props) {
           </div>
         ) : (
           <div className="space-y-4">
+            {/* Trade summary — what the user gives and receives */}
             <div className="rounded-md border p-4 space-y-1 text-sm">
               {isAsk ? (
                 <>

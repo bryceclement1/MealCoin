@@ -1,3 +1,14 @@
+/**
+ * Root layout — wraps every page with global providers, navigation, and the
+ * verification guard.
+ *
+ * Provider order (innermost to outermost):
+ *   SmartAccountProvider → QueryClientProvider → WagmiProvider
+ *
+ * The Nav renders above all pages. The VerificationGuard enforces that only
+ * verified students (with a linked @davidson.edu email) can access protected routes.
+ */
+
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";

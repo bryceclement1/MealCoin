@@ -15,7 +15,9 @@ async function main() {
   console.log('[INFO] MealCoin indexer starting...')
   registerExpiryCron()
 
-  // Start from the current block — ignore any previously saved state
+  // Always start from the current block rather than replaying historical events.
+  // The DB is treated as a live mirror of on-chain state, not a full archive,
+  // so we only care about events that happen while the indexer is running.
   const startBlock = await client.getBlockNumber()
   saveLastBlock(startBlock)
   console.log(`[INFO] Starting from block ${startBlock}`)

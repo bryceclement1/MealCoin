@@ -1,3 +1,11 @@
+/**
+ * Modal for sending meal swipes directly to another wallet address.
+ *
+ * Calls the MealSwipeToken `transfer()` function via the Kernel smart account
+ * (gasless). The button is disabled when the user has no swipes. Input
+ * validation prevents sending more swipes than the user's current balance.
+ */
+
 'use client'
 
 import { useState } from 'react'
@@ -16,11 +24,16 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 
+/** Map known contract revert reason strings to user-friendly messages. */
 const REVERT_MESSAGES: Record<string, string> = {
   InsufficientBalance: "You don't have enough swipes",
   InvalidAmount: 'Invalid swipe count',
 }
 
+/**
+ * Parse a transaction error and return a human-readable message.
+ * Falls back to a generic message if the revert reason is not recognized.
+ */
 function parseRevertError(error: unknown): string {
   const msg = error instanceof Error ? error.message : String(error)
   for (const [key, value] of Object.entries(REVERT_MESSAGES)) {
@@ -29,6 +42,10 @@ function parseRevertError(error: unknown): string {
   return 'Transaction failed. Please try again.'
 }
 
+/**
+ * Render the "Send Swipe" button and its confirmation dialog.
+ * Resets all form state when the dialog is closed.
+ */
 export function SendSwipeModal() {
   const { smartAddress, kernelClient } = useSmartAccount()
   const { data: balance } = useMSTBalance(smartAddress)
@@ -41,6 +58,7 @@ export function SendSwipeModal() {
 
   const maxBalance = Number(balance ?? 0)
 
+  /** Reset all form fields when the dialog closes. */
   function handleOpenChange(val: boolean) {
     setOpen(val)
     if (!val) {
@@ -52,6 +70,7 @@ export function SendSwipeModal() {
     }
   }
 
+  /** Validate inputs and submit the transfer transaction. */
   async function handleSend() {
     if (!kernelClient) return
     setError('')

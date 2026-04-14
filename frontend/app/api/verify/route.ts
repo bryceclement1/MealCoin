@@ -1,7 +1,28 @@
+/**
+ * POST /api/verify
+ *
+ * Start the email verification flow for a new user.
+ * Generates a short-lived verification token, stores it in Supabase, and
+ * sends a magic link to the student's @davidson.edu address via Supabase Auth.
+ *
+ * The link in the email redirects to /api/verify/confirm?token=<uuid>, where
+ * server-side validation links the wallet to the email in the students table.
+ *
+ * Request body:
+ *   wallet_address   (string) — the student's smart account address
+ *   davidson_email   (string) — must end with @davidson.edu
+ *
+ * Responses:
+ *   200 { success: true, message: string }             — email sent
+ *   400 { error: string, field: string }               — validation failure
+ *   500 { error: string }                              — DB or email sending failure
+ */
+
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, supabaseAuth } from '@/lib/supabase'
 import { validateWalletAddress, validateDavidsonEmail, validationError } from '@/lib/validate'
 
+/** Validate inputs, create a verification token, and send the magic link email. */
 export async function POST(req: NextRequest) {
   const { wallet_address, davidson_email } = await req.json()
 
@@ -16,6 +37,7 @@ export async function POST(req: NextRequest) {
   const normalizedWallet = wallet_address.toLowerCase()
   const normalizedEmail = davidson_email.toLowerCase()
 
+  // Generate a UUID token valid for 15 minutes
   const token = crypto.randomUUID()
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
 
@@ -29,9 +51,10 @@ export async function POST(req: NextRequest) {
 
   const appUrl = process.env.APP_URL ?? 'http://localhost:3000'
 
-  // Supabase sends the email (good deliverability for Davidson's Exchange filters).
-  // emailRedirectTo includes our custom ?token= so the confirm route can verify
-  // server-side without any client-side wallet or JS needed.
+  // Use Supabase Auth to send the email — it has better deliverability for
+  // Davidson's Exchange mail filters than a plain SMTP send would.
+  // The emailRedirectTo includes our token so the confirm route can verify
+  // server-side without needing any browser-side wallet or JS context.
   const { error: otpError } = await supabaseAuth.auth.signInWithOtp({
     email: normalizedEmail,
     options: {

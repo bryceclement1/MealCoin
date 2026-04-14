@@ -1,3 +1,11 @@
+/**
+ * Dashboard page — the home screen for verified students.
+ *
+ * Shows the student's current swipe and USDC balances, a countdown to the
+ * weekly swipe expiry (Saturday midnight), and buttons to send swipes or USDC
+ * directly to another wallet.
+ */
+
 'use client'
 
 import { BalanceCard } from '@/components/dashboard/balance-card'

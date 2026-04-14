@@ -1,3 +1,17 @@
+/**
+ * Modal for creating a new ask (sell) or bid (buy) offer on the Marketplace.
+ *
+ * Creating an offer requires two on-chain steps batched into a single UserOp:
+ *   - Ask: approve(Marketplace, swipeCount) + createSellOffer(count, price)
+ *   - Bid: approve(Marketplace, totalUSDC) + createBuyOffer(count, price)
+ *
+ * Batching is critical — without it the user would need to sign two separate
+ * transactions, and the approval would be useless if the second tx failed.
+ *
+ * A "blackout" window at 11:55 PM Saturday disables offer creation to prevent
+ * offers being posted just before the weekly token burn.
+ */
+
 'use client'
 
 import { useState } from 'react'
@@ -21,8 +35,10 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 
+/** Convert a dollar amount to USDC's 6-decimal integer format (e.g. 7.00 → 7_000_000n). */
 const toUSDC = (dollars: number) => BigInt(Math.round(dollars * 1_000_000))
 
+/** Map known contract revert reasons to user-friendly messages. */
 const REVERT_MESSAGES: Record<string, string> = {
   InsufficientBalance: "You don't have enough swipes",
   InsufficientAllowance: 'Approval failed — please try again',
@@ -34,6 +50,10 @@ const REVERT_MESSAGES: Record<string, string> = {
   OfferAlreadyExpired: 'Cannot post offer — weekly expiry window has passed',
 }
 
+/**
+ * Parse a transaction error and return a human-readable message.
+ * Falls back to a generic message if the revert reason is not recognized.
+ */
 function parseRevertError(error: unknown): string {
   console.error('[createOffer] tx error:', error)
   const msg = error instanceof Error ? error.message : String(error)
@@ -43,6 +63,11 @@ function parseRevertError(error: unknown): string {
   return 'Transaction failed. Please try again.'
 }
 
+/**
+ * Return true if it is Saturday 11:55 PM or later.
+ * Offers posted in this window would expire almost immediately once the
+ * weekly burn fires at midnight, so we block them client-side.
+ */
 function isBlackout(): boolean {
   const now = new Date()
   return now.getDay() === 6 && now.getHours() === 23 && now.getMinutes() >= 55
@@ -50,6 +75,10 @@ function isBlackout(): boolean {
 
 type OfferType = 'ask' | 'bid'
 
+/**
+ * Render the "Post Offer" button and its offer creation dialog.
+ * Handles form state, client-side validation, and the batched approval + create transaction.
+ */
 export function CreateOfferModal() {
   const { smartAddress, kernelClient } = useSmartAccount()
   const { data: mstBalance } = useMSTBalance(smartAddress)
@@ -69,6 +98,7 @@ export function CreateOfferModal() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isDone, setIsDone] = useState(false)
 
+  /** Reset all form fields to their defaults. */
   function resetForm() {
     setOfferType('ask')
     setSwipeCount(1)
@@ -78,11 +108,17 @@ export function CreateOfferModal() {
     setIsDone(false)
   }
 
+  /** Reset form state when the dialog closes. */
   function handleOpenChange(val: boolean) {
     setOpen(val)
     if (!val) resetForm()
   }
 
+  /**
+   * Validate form inputs against business rules.
+   * Returns true if valid, false (and sets error) if not.
+   * Mirrors on-chain constraints so the UI catches errors before the transaction.
+   */
   function validate(): boolean {
     const price = parseFloat(pricePerSwipe)
     if (!pricePerSwipe || isNaN(price) || price <= 0) {
@@ -118,6 +154,11 @@ export function CreateOfferModal() {
     return true
   }
 
+  /**
+   * Submit the offer creation transaction.
+   * For asks: batches token approval + createSellOffer in one UserOp.
+   * For bids: batches USDC approval + createBuyOffer in one UserOp.
+   */
   async function handleSubmit() {
     if (!kernelClient) return
     setError('')

@@ -1,3 +1,11 @@
+/**
+ * Dashboard card showing the connected wallet's swipe and USDC balances.
+ *
+ * Reads balances from the MealSwipeToken and USDC contracts via wagmi hooks.
+ * Shows loading skeletons while data is in flight, and a prompt to connect
+ * if no wallet is connected.
+ */
+
 'use client'
 
 import { useAccount } from 'wagmi'
@@ -7,6 +15,11 @@ import { useUSDCBalance } from '@/hooks/use-usdc-balance'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 
+/**
+ * Render the balance card. Displays swipe count (whole number) and USDC
+ * balance formatted to 2 decimal places. USDC raw value is divided by
+ * 1_000_000 to convert from 6-decimal token units to dollars.
+ */
 export function BalanceCard() {
   const { isConnected } = useAccount()
   const { smartAddress } = useSmartAccount()
@@ -26,6 +39,7 @@ export function BalanceCard() {
     )
   }
 
+  // Convert USDC from 6-decimal raw bigint to a dollar string (e.g. "7.00")
   const usdcFormatted = usdcBalance !== undefined
     ? (Number(usdcBalance) / 1_000_000).toFixed(2)
     : null

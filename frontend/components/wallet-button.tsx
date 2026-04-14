@@ -1,3 +1,15 @@
+/**
+ * Wallet connection button shown in the navigation bar.
+ *
+ * Has two states:
+ *   - Disconnected: shows a "Connect Wallet" button that opens a connector picker dialog
+ *   - Connected: shows a dropdown with the truncated smart account address, a
+ *                "Copy address" option, and a "Disconnect" option
+ *
+ * Displays the smart account address (not the raw EOA) because that is the address
+ * that holds the user's tokens and is registered in the students table.
+ */
+
 'use client'
 
 import { useAccount, useConnect, useDisconnect } from 'wagmi'
@@ -17,10 +29,15 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
+/** Shorten an address to "0x1234...abcd" for display. */
 function truncateAddress(address: string) {
   return `${address.slice(0, 6)}...${address.slice(-4)}`
 }
 
+/**
+ * Render the wallet button. Shows a dropdown when connected, or a connector
+ * picker dialog when disconnected.
+ */
 export function WalletButton() {
   const { isConnected } = useAccount()
   const { smartAddress } = useSmartAccount()

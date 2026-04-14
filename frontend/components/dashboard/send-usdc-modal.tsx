@@ -1,3 +1,11 @@
+/**
+ * Modal for sending USDC directly to another wallet address.
+ *
+ * Calls the USDC `transfer()` function via the Kernel smart account (gasless).
+ * The button is disabled when the user has no USDC balance. Dollar amounts
+ * are converted to USDC's 6-decimal integer format before the on-chain call.
+ */
+
 'use client'
 
 import { useState } from 'react'
@@ -16,6 +24,10 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 
+/**
+ * Parse a transaction error and return a human-readable message.
+ * Falls back to a generic message if the revert reason is not recognized.
+ */
 function parseRevertError(error: unknown): string {
   const msg = error instanceof Error ? error.message : String(error)
   if (msg.includes('InsufficientBalance') || msg.includes('transfer amount exceeds balance')) {
@@ -24,8 +36,16 @@ function parseRevertError(error: unknown): string {
   return 'Transaction failed. Please try again.'
 }
 
+/**
+ * Convert a dollar amount to USDC's 6-decimal integer format.
+ * Example: 7.50 → 7_500_000n
+ */
 const toUSDC = (dollars: number) => BigInt(Math.round(dollars * 1_000_000))
 
+/**
+ * Render the "Send USDC" button and its confirmation dialog.
+ * Resets all form state when the dialog is closed.
+ */
 export function SendUSDCModal() {
   const { smartAddress, kernelClient } = useSmartAccount()
   const { data: usdcBalance } = useUSDCBalance(smartAddress)
@@ -36,10 +56,12 @@ export function SendUSDCModal() {
   const [isPending, setIsPending] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)
 
+  // Convert raw bigint balance to a human-readable dollar amount for display
   const maxBalance = usdcBalance !== undefined
     ? Number(usdcBalance) / 1_000_000
     : 0
 
+  /** Reset all form fields when the dialog closes. */
   function handleOpenChange(val: boolean) {
     setOpen(val)
     if (!val) {
@@ -51,6 +73,7 @@ export function SendUSDCModal() {
     }
   }
 
+  /** Validate inputs and submit the USDC transfer transaction. */
   async function handleSend() {
     if (!kernelClient) return
     setError('')

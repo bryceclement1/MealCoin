@@ -1,3 +1,12 @@
+/**
+ * Filter and sort controls for the listings page.
+ *
+ * Renders a card with three controls: max swipe count, max price per swipe,
+ * and sort order. All filtering is done client-side in offer-list.tsx —
+ * this component is purely presentational and notifies the parent of changes
+ * via the onChange callback.
+ */
+
 'use client'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -5,12 +14,14 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 
+/** The filter state managed by ListingsClient and passed into OfferList. */
 export type OfferFilters = {
-  maxSwipes: number | ''
-  maxPrice: string
+  maxSwipes: number | ''   // '' means no limit
+  maxPrice: string         // '' means no limit; string to allow partial input like "7."
   sortOrder: 'price_asc' | 'swipes_desc'
 }
 
+/** Default filter state — no filters active, sorted cheapest first. */
 export const DEFAULT_FILTERS: OfferFilters = {
   maxSwipes: '',
   maxPrice: '',
@@ -24,6 +35,11 @@ interface FilterBoxProps {
   onChange: (filters: OfferFilters) => void
 }
 
+/**
+ * Render the filter control card.
+ * Shows a "Clear filters" button whenever any filter is active.
+ * Clearing filters preserves the current sort order.
+ */
 export function FilterBox({ filters, onChange }: FilterBoxProps) {
   const isActive = filters.maxSwipes !== '' || filters.maxPrice !== ''
 

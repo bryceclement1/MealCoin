@@ -1,7 +1,20 @@
+/**
+ * Offer expiry cron job — runs every Saturday at 11:56 PM EST (04:56 UTC Sunday).
+ *
+ * Why this job exists:
+ *   The Marketplace contract marks offers as expired only when someone calls
+ *   `claimExpiredOffer()`. Without this job, expired offers would sit in the
+ *   DB as "pending" indefinitely because no user would call that function.
+ *   This job acts as the automated cleanup trigger: it finds all pending offers
+ *   that have passed their expiry timestamp, calls `claimExpiredOffer()` on-chain
+ *   for each one, which emits an `OfferExpired` event, which the indexer then
+ *   catches to set the DB status to "expired".
+ */
+
 import cron from 'node-cron'
 import { createWalletClient, createPublicClient, http } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { baseSepolia } from 'viem/chains'
+import { base } from 'viem/chains'
 import { createClient } from '@supabase/supabase-js'
 import { config } from '../config'
 import { withRetry } from '../retry'
@@ -10,6 +23,7 @@ import { MARKETPLACE_ABI } from '../../abis/marketplace'
 const supabase = createClient(config.supabaseUrl, config.supabaseKey)
 
 async function expireOffers(): Promise<void> {
+  // Find all offers that are still marked "pending" but whose expiry time has passed
   const { data, error } = await supabase
     .from('offers')
     .select('onchain_offer_id')
@@ -30,14 +44,15 @@ async function expireOffers(): Promise<void> {
 
   const account = privateKeyToAccount(config.privateKey as `0x${string}`)
 
+  // Use the deployer wallet to submit the claimExpiredOffer() transactions
   const walletClient = createWalletClient({
     account,
-    chain: baseSepolia,
+    chain: base,
     transport: http(config.rpcUrl),
   })
 
   const publicClient = createPublicClient({
-    chain: baseSepolia,
+    chain: base,
     transport: http(config.rpcUrl),
   })
 

@@ -1,3 +1,14 @@
+/**
+ * Trade history page — shows the connected wallet's combined record of
+ * trades (bought and sold) and dining redemptions.
+ *
+ * Data is fetched from /api/wallet/[address]/history via the useHistory hook,
+ * which refreshes every 30 seconds. Each item is color-coded by type:
+ *   - Bought (green): user purchased swipes from a sell offer
+ *   - Sold (blue): user's sell offer was accepted by another user
+ *   - Redeemed (orange): user's swipe was burned at a dining terminal
+ */
+
 'use client'
 
 import { useAccount } from 'wagmi'
@@ -6,20 +17,27 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { type HistoryItem } from '@/lib/api'
 
+/** Shorten a tx hash to "0x12345678...abcdef" for compact display. */
 const truncateTx = (hash: string) => `${hash.slice(0, 10)}...${hash.slice(-6)}`
 
+/** Human-readable labels for each history item type. */
 const TYPE_LABEL: Record<HistoryItem['type'], string> = {
   trade_bought: 'Bought',
   trade_sold: 'Sold',
   redemption: 'Redeemed',
 }
 
+/** Tailwind color classes for each history item type. */
 const TYPE_COLOR: Record<HistoryItem['type'], string> = {
   trade_bought: 'text-green-600',
   trade_sold:   'text-blue-600',
   redemption:   'text-orange-500',
 }
 
+/**
+ * Render the history page. Shows loading skeletons while fetching, an empty
+ * state if no history exists, and a list of HistoryCard components otherwise.
+ */
 export default function HistoryPage() {
   const { isConnected } = useAccount()
   const { data, isLoading } = useHistory()
@@ -49,6 +67,10 @@ export default function HistoryPage() {
   )
 }
 
+/**
+ * Single history row card. Displays the event type (color-coded), swipe count,
+ * total price (if applicable), shortened tx hash, and a formatted timestamp.
+ */
 function HistoryCard({ item }: { item: HistoryItem }) {
   const date = new Date(item.timestamp).toLocaleString('en-US', {
     month: 'short',

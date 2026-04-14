@@ -64,7 +64,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: markUsedError.message }, { status: 500 })
   }
 
-  // Clear this wallet from any other email it may have been linked to
+  // If this wallet was previously linked to a different email, unlink it there first.
+  // Without this step, the same wallet address could appear against two emails
+  // simultaneously, which would break the one-wallet-per-student rule.
   const { error: clearError } = await supabase
     .from('students')
     .update({ wallet_address: null, verified_at: null })
@@ -75,7 +77,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: clearError.message }, { status: 500 })
   }
 
-  // Upsert — creates new row for first-time users, updates wallet for returning/takeover
+  // Upsert on davidson_email (the unique key on the students table):
+  //   - First-time user → inserts a new row
+  //   - Returning user / wallet swap → updates the existing row's wallet address
+  // This is safe because the email is pre-seeded in the table and can't change.
   const { error: upsertError } = await supabase
     .from('students')
     .upsert(

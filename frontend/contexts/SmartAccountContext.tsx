@@ -57,4 +57,17 @@ export function SmartAccountProvider({ children }: { children: React.ReactNode }
   )
 }
 
+/**
+ * Hook for consuming the smart account context anywhere in the app.
+ *
+ * Returns:
+ *   - `smartAddress` — The ERC-4337 smart account address derived from the connected EOA.
+ *                      Use this (not the raw EOA address) for on-chain reads and displaying
+ *                      the user's wallet address, since tokens are held by the smart account.
+ *   - `kernelClient` — The Kernel account client used to send gasless UserOperations.
+ *                      Call `kernelClient.writeContract(...)` instead of the standard wagmi
+ *                      `writeContract` to route through the Pimlico paymaster.
+ *   - `isLoading`    — True while the smart account is being derived from the EOA signer.
+ *                      Gate any transaction UI behind `!isLoading && !!kernelClient`.
+ */
 export const useSmartAccount = () => useContext(SmartAccountContext)

@@ -1,3 +1,20 @@
+/**
+ * Onboarding page — links a connected wallet to a Davidson email address.
+ *
+ * This is the entry point for new users. The flow:
+ *   1. User connects their Coinbase Wallet (smart account is derived automatically)
+ *   2. User enters their @davidson.edu email address
+ *   3. A POST to /api/verify sends a verification link to that email
+ *   4. User clicks the link in their email, which calls /api/verify/confirm
+ *   5. The confirm route links the wallet address to the email in Supabase
+ *   6. The VerificationGuard redirects the user to the dashboard
+ *
+ * The page shows different content based on connection + loading state:
+ *   - Not connected / smart wallet loading → prompt to connect
+ *   - Email sent → check your email message
+ *   - Ready → email input form
+ */
+
 'use client'
 
 import { useState } from 'react'
@@ -14,6 +31,7 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(false)
   const [sent, setSent] = useState(false)
 
+  // Wait for both wallet connection and smart account derivation before showing the form
   if (!isConnected || isSmartLoading || !address) {
     return (
       <main className="flex min-h-[80vh] flex-col items-center justify-center gap-4">
@@ -26,6 +44,10 @@ export default function OnboardingPage() {
     )
   }
 
+  /**
+   * Handle form submission: validate email client-side, then POST to /api/verify.
+   * On success, show the "check your email" screen.
+   */
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')

@@ -1,3 +1,12 @@
+/**
+ * Modal for cancelling the connected user's own marketplace offer.
+ *
+ * Calls cancelOffer() on the Marketplace contract via the Kernel smart account.
+ * The contract verifies on-chain that only the offer creator can cancel, and
+ * returns the escrowed assets (swipes or USDC) to their wallet before emitting
+ * the OfferCancelled event.
+ */
+
 'use client'
 
 import { useState } from 'react'
@@ -14,12 +23,17 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 
+/** Map known contract revert reasons to user-friendly messages. */
 const REVERT_MESSAGES: Record<string, string> = {
   NotOfferCreator: 'Only the offer creator can cancel',
   OfferNotPending: 'This offer is no longer active',
   OfferNotFound: 'Offer not found',
 }
 
+/**
+ * Parse a transaction error and return a human-readable message.
+ * Falls back to a generic message if the revert reason is not recognized.
+ */
 function parseRevertError(error: unknown): string {
   console.error('[cancelOffer] tx error:', error)
   const msg = error instanceof Error ? error.message : String(error)
@@ -34,6 +48,11 @@ interface Props {
   onCancelled: () => void
 }
 
+/**
+ * Render the "Cancel" button and its confirmation dialog.
+ * Shows a summary of what will be returned to the user's wallet.
+ * Calls onCancelled() after a successful transaction to refresh the listings.
+ */
 export function CancelOfferModal({ offer, onCancelled }: Props) {
   const { kernelClient } = useSmartAccount()
   const [open, setOpen] = useState(false)
@@ -44,17 +63,20 @@ export function CancelOfferModal({ offer, onCancelled }: Props) {
   const isAsk = offer.type === 'ask'
   const totalUsdcDisplay = (offer.swipe_count * offer.price_per_swipe).toFixed(2)
 
+  /** Reset form state when the dialog closes. */
   function resetForm() {
     setError('')
     setIsSubmitting(false)
     setIsDone(false)
   }
 
+  /** Reset form state when the dialog closes. */
   function handleOpenChange(val: boolean) {
     setOpen(val)
     if (!val) resetForm()
   }
 
+  /** Submit the cancelOffer transaction. */
   async function handleCancel() {
     if (!kernelClient) return
     setError('')
@@ -94,6 +116,7 @@ export function CancelOfferModal({ offer, onCancelled }: Props) {
           </div>
         ) : (
           <div className="space-y-4">
+            {/* Summary of what will be returned to the user */}
             <div className="rounded-md border p-4 space-y-1 text-sm">
               {isAsk ? (
                 <p>

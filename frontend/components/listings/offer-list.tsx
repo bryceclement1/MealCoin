@@ -1,3 +1,15 @@
+/**
+ * Offer list component — renders a filterable, sortable list of ask or bid offers.
+ *
+ * Fetches data from the Supabase-backed API via SWR (refreshes every 15s).
+ * Applies client-side filtering and sorting on top of the API results so users
+ * can narrow down without additional round-trips.
+ *
+ * Each offer card shows the owner a Cancel button and all other users an Accept button.
+ * Ownership is determined by comparing the connected smart account address to the
+ * offer's seller_address.
+ */
+
 'use client'
 
 import { useSmartAccount } from '@/contexts/SmartAccountContext'
@@ -9,8 +21,13 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { type OfferFilters } from '@/components/listings/filter-box'
 
+/** Shorten an address to "0x1234...abcd" for display in offer cards. */
 const truncate = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
 
+/**
+ * Filter offers by the user-selected max swipe count and max price.
+ * Empty string values for maxSwipes or maxPrice mean "no limit".
+ */
 function applyFilters(offers: Offer[], filters: OfferFilters): Offer[] {
   return offers.filter((offer) => {
     if (filters.maxSwipes !== '' && offer.swipe_count > filters.maxSwipes) return false
@@ -19,6 +36,10 @@ function applyFilters(offers: Offer[], filters: OfferFilters): Offer[] {
   })
 }
 
+/**
+ * Sort offers by the user-selected sort order.
+ * Returns a new array (does not mutate the input).
+ */
 function applySortOrder(offers: Offer[], sortOrder: OfferFilters['sortOrder']): Offer[] {
   return [...offers].sort((a, b) =>
     sortOrder === 'price_asc'
@@ -27,6 +48,7 @@ function applySortOrder(offers: Offer[], sortOrder: OfferFilters['sortOrder']): 
   )
 }
 
+/** Return true if any filter is currently active (used to show/hide empty state messages). */
 function hasActiveFilters(filters: OfferFilters): boolean {
   return filters.maxSwipes !== '' || filters.maxPrice !== ''
 }
@@ -36,6 +58,11 @@ interface Props {
   filters: OfferFilters
 }
 
+/**
+ * Fetch and render a filtered, sorted list of offers of the given type.
+ * Shows loading skeletons while data is in flight and an empty state message
+ * when no offers match (with different wording for filtered vs. truly empty).
+ */
 export function OfferList({ type, filters }: Props) {
   const { smartAddress: address } = useSmartAccount()
   const asksResult = useAsks()
@@ -48,6 +75,8 @@ export function OfferList({ type, filters }: Props) {
     type === 'ask'
       ? (asksResult.data?.asks ?? [])
       : (bidsResult.data?.bids ?? [])
+
+  // Inject the type field (not returned by the API for combined endpoints)
   const allOffers: Offer[] = rawOffers.map((o) => ({ ...o, type }))
   const offers = applySortOrder(applyFilters(allOffers, filters), filters.sortOrder)
 
@@ -86,6 +115,12 @@ export function OfferList({ type, filters }: Props) {
   )
 }
 
+/**
+ * Individual offer card. Shows price, swipe count, total, seller address, and expiry.
+ * Renders a Cancel button if this offer belongs to the connected wallet, or an
+ * Accept button for all other offers. Calls onDone() after a successful action
+ * to trigger a data refresh.
+ */
 function OfferCard({
   offer,
   isOwn,

@@ -26,6 +26,8 @@ export async function GET(
     supabase
       .from('trades')
       .select('buyer_address, seller_address, swipe_count, price, tx_hash, traded_at')
+      // A trade involves two parties. We query both sides so the same tx appears
+      // in both the buyer's and seller's history with different type labels.
       .or(`buyer_address.eq.${lower},seller_address.eq.${lower}`),
     supabase
       .from('redemptions')

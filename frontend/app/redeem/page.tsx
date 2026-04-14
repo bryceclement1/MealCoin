@@ -1,3 +1,21 @@
+/**
+ * Redeem page — dual-mode UI that serves two different audiences:
+ *
+ *   STUDENT VIEW (default):
+ *     Shows the student's current swipe balance and a QR code of their smart
+ *     account address. The student holds their phone up at the dining hall so
+ *     the cashier can scan it.
+ *
+ *   DINING TERMINAL VIEW:
+ *     Shown when the connected wallet is an approved dining address (set by the
+ *     contract owner via `approveDining()`). The cashier scans a student's QR
+ *     code, sees their live balance, then taps "Redeem Swipe" to call
+ *     `redeemSwipe()` on the token contract, which burns one swipe on-chain.
+ *
+ * Which view is shown is determined solely by the on-chain `approvedDining`
+ * mapping — no special login or role system is needed.
+ */
+
 'use client'
 
 import { useState, useEffect, useRef } from 'react'

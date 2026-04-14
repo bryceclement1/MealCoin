@@ -1,8 +1,21 @@
+/**
+ * Dashboard card showing a live countdown to the weekly swipe expiry.
+ *
+ * Swipes expire every Saturday at 11:59 PM (matching the on-chain burnAll schedule).
+ * The countdown updates every second via setInterval. The card border and text
+ * turn red when fewer than 24 hours remain to create urgency.
+ */
+
 'use client'
 
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
+/**
+ * Compute the Date of the next Saturday at 11:59:59 PM local time.
+ * If today is Saturday, returns next Saturday (not today) so the countdown
+ * never shows zero on Saturday morning.
+ */
 function getNextSaturdayMidnight(): Date {
   const now = new Date()
   const day = now.getDay() // 0=Sun, 6=Sat
@@ -13,6 +26,10 @@ function getNextSaturdayMidnight(): Date {
   return saturday
 }
 
+/**
+ * Break a millisecond duration into days, hours, minutes, and seconds.
+ * Returns zeroes if the duration is negative (already expired).
+ */
 function formatCountdown(ms: number) {
   if (ms <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0 }
   const totalSeconds = Math.floor(ms / 1000)
@@ -24,6 +41,10 @@ function formatCountdown(ms: number) {
   }
 }
 
+/**
+ * Render the expiry countdown card. Ticks every second. Highlights in red
+ * when fewer than 24 hours remain before Saturday midnight.
+ */
 export function ExpiryCountdown() {
   const [msLeft, setMsLeft] = useState<number | null>(null)
 
@@ -39,7 +60,7 @@ export function ExpiryCountdown() {
   if (msLeft === null) return null
 
   const { days, hours, minutes, seconds } = formatCountdown(msLeft)
-  const isUrgent = msLeft < 24 * 60 * 60 * 1000
+  const isUrgent = msLeft < 24 * 60 * 60 * 1000  // less than 24 hours remaining
 
   return (
     <Card className={isUrgent ? 'border-destructive' : ''}>

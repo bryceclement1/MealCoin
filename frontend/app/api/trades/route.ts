@@ -1,7 +1,23 @@
+/**
+ * GET /api/trades
+ *
+ * Return completed trades, optionally filtered to a specific wallet.
+ * A trade is recorded when an offer is accepted (OfferAccepted event on-chain).
+ *
+ * Query params:
+ *   wallet (optional) — filter to trades where this address is buyer OR seller
+ *
+ * Responses:
+ *   200 { trades: Trade[] }                  — sorted by traded_at descending
+ *   400 { error: string, field: 'wallet' }   — invalid wallet address format
+ *   500 { error: string }                    — database error
+ */
+
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { validateWalletAddress, validationError } from '@/lib/validate'
 
+/** Fetch completed trades, with an optional wallet filter applied to both sides. */
 export async function GET(request: NextRequest) {
   const wallet = request.nextUrl.searchParams.get('wallet')
 
@@ -17,6 +33,7 @@ export async function GET(request: NextRequest) {
     .order('traded_at', { ascending: false })
 
   if (wallet !== null) {
+    // Filter to trades where this wallet is either the buyer or the seller
     const lower = wallet.toLowerCase()
     query = query.or(`buyer_address.eq.${lower},seller_address.eq.${lower}`)
   }

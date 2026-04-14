@@ -1,6 +1,14 @@
+/**
+ * Top navigation bar shown on every page.
+ *
+ * Contains links to all main sections of the app and the wallet connection
+ * button. Rendered once in app/layout.tsx, above the VerificationGuard.
+ */
+
 import Link from 'next/link'
 import { WalletButton } from '@/components/wallet-button'
 
+/** Render the site-wide navigation bar. */
 export function Nav() {
   return (
     <nav className="border-b">
