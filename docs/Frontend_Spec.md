@@ -130,7 +130,7 @@ frontend/
    - `410` → "Verification link has expired — request a new one"
    - `400` → "Invalid or already-used verification link"
 
-**Email sending:** Use [Resend](https://resend.com) (`npm install resend`). Add `RESEND_API_KEY` to `.env.local`. Send from `noreply@davidson.edu` (or a Resend sandbox address for the prototype).
+**Email sending:** Uses Supabase Auth (`supabaseAuth.auth.signInWithOtp`). No extra package required — the Supabase client is already installed. Requires `SUPABASE_URL` and `SUPABASE_ANON_KEY` (or service role key) in `.env.local`.
 
 **New API endpoints required:**
 - `POST /api/verify` — validate email exists, generate token, send confirmation email
@@ -427,7 +427,7 @@ npm install wagmi viem @tanstack/react-query swr
 
 **What:** `/onboarding` page + `/onboarding/confirm` handler. Two-step email confirmation flow.
 
-**Install:** `npm install resend` — add `RESEND_API_KEY` to `.env.local`.
+**Note:** Email is sent via Supabase Auth (`signInWithOtp`) — no extra package needed.
 
 **Step 1 — `/onboarding` (email entry):**
 - If connected wallet not in `students` table, redirect here (checked via `GET /api/students?wallet=0x...`)

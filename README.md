@@ -583,6 +583,6 @@ cast send $TOKEN_ADDRESS \
 | QR scanner | html5-qrcode |
 | Database | Supabase (PostgreSQL) |
 | Indexer | Node.js · viem · Railway |
-| Email | Resend API |
+| Email | Supabase Auth (magic link / OTP) |
 | Frontend deploy | Vercel |
 | Indexer deploy | Railway |

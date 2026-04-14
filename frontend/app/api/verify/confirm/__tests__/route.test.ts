@@ -58,16 +58,20 @@ describe('GET /api/verify/confirm', () => {
   })
 
   // ── Domain errors ──────────────────────────────────────────────────────────
+  // The /confirm route is a browser-facing endpoint (users click it from email).
+  // For user-visible errors it returns an HTML page with status 200 rather than
+  // a JSON error body.  Only the missing-token and DB-failure cases return JSON.
 
-  it('returns 400 when token is not found in the database', async () => {
+  it('returns an HTML page when token is not found in the database', async () => {
     mockTokenLookup({ data: null, error: null })
     const res = await GET(makeRequest(VALID_TOKEN))
-    expect(res.status).toBe(400)
-    const body = await res.json()
-    expect(body).toHaveProperty('error')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/html')
+    const html = await res.text()
+    expect(html).toContain('Invalid link')
   })
 
-  it('returns 400 when token has already been used', async () => {
+  it('returns an HTML page when token has already been used', async () => {
     mockTokenLookup({
       data: {
         token: VALID_TOKEN,
@@ -79,12 +83,13 @@ describe('GET /api/verify/confirm', () => {
       error: null,
     })
     const res = await GET(makeRequest(VALID_TOKEN))
-    expect(res.status).toBe(400)
-    const body = await res.json()
-    expect(body).toHaveProperty('error')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/html')
+    const html = await res.text()
+    expect(html).toContain('Already verified')
   })
 
-  it('returns 410 when token is expired', async () => {
+  it('returns an HTML page when token is expired', async () => {
     mockTokenLookup({
       data: {
         token: VALID_TOKEN,
@@ -96,9 +101,10 @@ describe('GET /api/verify/confirm', () => {
       error: null,
     })
     const res = await GET(makeRequest(VALID_TOKEN))
-    expect(res.status).toBe(410)
-    const body = await res.json()
-    expect(body).toHaveProperty('error')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/html')
+    const html = await res.text()
+    expect(html).toContain('Link expired')
   })
 
   // ── Consistent error shape ──────────────────────────────────────────────────

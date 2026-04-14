@@ -245,13 +245,12 @@ Step 1 of email verification. Validates the email exists in the student list, ge
 5. If student already has a different `wallet_address`, return 409
 6. Check if any other student has this `wallet_address` — 409 if so
 7. Generate a UUID token, insert into `verification_tokens` with `expires_at = NOW() + interval '15 minutes'`
-8. Send email via Resend to `davidson_email`:
-   - **Subject:** `Verify your MealCoin account`
-   - **Body:** `Click the link below to verify your Davidson email and activate your MealCoin wallet. This link expires in 15 minutes. <APP_URL>/onboarding/confirm?token=<token>`
-   - If Resend returns an error, return 500 with `{ "error": "Failed to send verification email" }`
+8. Send email via Supabase Auth (`supabaseAuth.auth.signInWithOtp`) to `davidson_email`:
+   - `emailRedirectTo` is set to `<APP_URL>/api/verify/confirm?token=<token>` so the confirm route can validate server-side
+   - If Supabase Auth returns an error, return 500 with `{ "error": "Failed to send verification email" }`
 9. Return 200
 
-**Email sending:** Uses [Resend](https://resend.com). Token generated with `crypto.randomUUID()`. Requires `RESEND_API_KEY` and `APP_URL` env vars.
+**Email sending:** Uses Supabase Auth's built-in OTP/magic-link delivery. Token generated with `crypto.randomUUID()`. Requires `APP_URL` env var; Supabase credentials already present in the environment.
 
 ---
 
@@ -579,15 +578,13 @@ NEXT_PUBLIC_USDC_ADDRESS=
 
 **Description:** Implement the two-step email verification flow. `POST /api/verify` sends a confirmation email; `GET /api/verify/confirm` validates the token and writes the wallet mapping.
 
-**Install:** `npm install resend`
-
 **Files to create/edit:**
 - `app/api/verify/route.ts` — POST handler (send email)
 - `app/api/verify/confirm/route.ts` — GET handler (validate token + map wallet)
 - `scripts/seed-students.ts` (seed ~20 fake `@davidson.edu` emails)
 
 **Acceptance Criteria:**
-- `POST /api/verify` sends a real email via Resend containing the confirm link
+- `POST /api/verify` sends a real email via Supabase Auth containing the confirm link
 - `GET /api/verify/confirm?token=` validates token, writes wallet mapping, redirects to `/`
 - Expired tokens (> 15 min) return 410
 - Used tokens return 400

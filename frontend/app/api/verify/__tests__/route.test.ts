@@ -23,31 +23,9 @@ function makeRequest(body: Record<string, unknown>): NextRequest {
 
 /** Sets up the full happy-path mock chain. */
 function mockHappyPath() {
-  const insertQuery = {
+  vi.mocked(supabase.from).mockReturnValue({
     insert: vi.fn().mockResolvedValue({ error: null }),
-  }
-  vi.mocked(supabase.from).mockImplementation((table: string) => {
-    if (table === 'students') {
-      const q = {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        neq: vi.fn().mockReturnThis(),
-        maybeSingle: vi.fn().mockResolvedValue({ data: { davidson_email: 'jdoe@davidson.edu', wallet_address: null }, error: null }),
-      }
-      // Second students call (wallet conflict) returns no conflict
-      let callCount = 0
-      q.maybeSingle.mockImplementation(() => {
-        callCount++
-        if (callCount === 1) return Promise.resolve({ data: { davidson_email: 'jdoe@davidson.edu', wallet_address: null }, error: null })
-        return Promise.resolve({ data: null, error: null })
-      })
-      return q as ReturnType<typeof supabase.from>
-    }
-    if (table === 'verification_tokens') {
-      return insertQuery as ReturnType<typeof supabase.from>
-    }
-    throw new Error(`Unexpected table: ${table}`)
-  })
+  } as ReturnType<typeof supabase.from>)
   vi.mocked(supabaseAuth.auth.signInWithOtp).mockResolvedValue({ data: {}, error: null } as never)
 }
 
@@ -114,34 +92,59 @@ describe('POST /api/verify', () => {
     expect(supabase.from).not.toHaveBeenCalled()
   })
 
-  // ── Domain errors ──────────────────────────────────────────────────────────
+  // ── Happy path ─────────────────────────────────────────────────────────────
 
-  it('returns 404 when email is not in the student list', async () => {
-    vi.mocked(supabase.from).mockReturnValue({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
-    } as ReturnType<typeof supabase.from>)
-
+  it('returns 200 { success: true } when inputs are valid', async () => {
+    mockHappyPath()
     const res = await POST(makeRequest({ wallet_address: VALID_WALLET, davidson_email: VALID_EMAIL }))
-    expect(res.status).toBe(404)
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.success).toBe(true)
+    expect(typeof body.message).toBe('string')
+  })
+
+  it('inserts a verification token into the DB on valid input', async () => {
+    mockHappyPath()
+    const insertMock = vi.mocked(supabase.from).mock.results
+    await POST(makeRequest({ wallet_address: VALID_WALLET, davidson_email: VALID_EMAIL }))
+    expect(supabase.from).toHaveBeenCalledWith('verification_tokens')
+  })
+
+  it('calls supabaseAuth.auth.signInWithOtp on valid input', async () => {
+    mockHappyPath()
+    await POST(makeRequest({ wallet_address: VALID_WALLET, davidson_email: VALID_EMAIL }))
+    expect(supabaseAuth.auth.signInWithOtp).toHaveBeenCalledOnce()
+  })
+
+  it('passes the davidson_email (lowercased) to signInWithOtp', async () => {
+    mockHappyPath()
+    await POST(makeRequest({ wallet_address: VALID_WALLET, davidson_email: 'JDOE@davidson.edu' }))
+    const call = vi.mocked(supabaseAuth.auth.signInWithOtp).mock.calls[0][0]
+    expect(call.email).toBe('jdoe@davidson.edu')
+  })
+
+  it('returns 500 when the token insert fails', async () => {
+    vi.mocked(supabase.from).mockReturnValue({
+      insert: vi.fn().mockResolvedValue({ error: { message: 'db error' } }),
+    } as ReturnType<typeof supabase.from>)
+    const res = await POST(makeRequest({ wallet_address: VALID_WALLET, davidson_email: VALID_EMAIL }))
+    expect(res.status).toBe(500)
     const body = await res.json()
     expect(body).toHaveProperty('error')
   })
 
-  it('returns 409 when email is already linked to a different wallet', async () => {
+  it('returns 500 when the email sending fails', async () => {
     vi.mocked(supabase.from).mockReturnValue({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      neq: vi.fn().mockReturnThis(),
-      maybeSingle: vi.fn().mockResolvedValue({
-        data: { davidson_email: VALID_EMAIL, wallet_address: '0x0000000000000000000000000000000000000099' },
-        error: null,
-      }),
+      insert: vi.fn().mockResolvedValue({ error: null }),
     } as ReturnType<typeof supabase.from>)
-
+    vi.mocked(supabaseAuth.auth.signInWithOtp).mockResolvedValue({
+      data: null as never,
+      error: { message: 'email failed', status: 500 } as never,
+    })
     const res = await POST(makeRequest({ wallet_address: VALID_WALLET, davidson_email: VALID_EMAIL }))
-    expect(res.status).toBe(409)
+    expect(res.status).toBe(500)
+    const body = await res.json()
+    expect(body).toHaveProperty('error')
   })
 
   // ── Consistent 400 error shape ─────────────────────────────────────────────
