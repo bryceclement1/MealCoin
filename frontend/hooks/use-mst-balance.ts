@@ -35,6 +35,10 @@ export function useMSTBalance(walletAddress?: `0x${string}`) {
     abi: TOKEN_ABI,
     functionName: 'balanceOf',
     args: walletAddress ? [walletAddress, week] : undefined,
-    query: { enabled: !!walletAddress },
+    query: {
+      enabled: !!walletAddress,
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+    },
   })
 }

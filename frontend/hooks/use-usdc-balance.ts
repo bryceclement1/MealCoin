@@ -23,6 +23,10 @@ export function useUSDCBalance(walletAddress?: `0x${string}`) {
     abi: USDC_ABI,
     functionName: 'balanceOf',
     args: walletAddress ? [walletAddress] : undefined,
-    query: { enabled: !!walletAddress },
+    query: {
+      enabled: !!walletAddress,
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+    },
   })
 }

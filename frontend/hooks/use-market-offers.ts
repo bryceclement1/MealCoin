@@ -43,6 +43,7 @@ export function useMarketOffers() {
     address: MARKET_ADDRESS,
     abi: MARKET_ABI,
     functionName: 'offerCount',
+    query: { staleTime: 30_000, refetchOnWindowFocus: false },
   })
 
   const count = offerCount ? Number(offerCount) : 0
@@ -57,7 +58,7 @@ export function useMarketOffers() {
 
   const { data: results, refetch, isLoading } = useReadContracts({
     contracts,
-    query: { enabled: count > 0 },
+    query: { enabled: count > 0, staleTime: 30_000, refetchOnWindowFocus: false },
   })
 
   // Filter to only successfully fetched pending offers
